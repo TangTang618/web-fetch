@@ -74,6 +74,49 @@ describe("resolveBackend", () => {
     expect(backend.kind).toBe("none");
     if (backend.kind === "none") expect(backend.reason).toContain("AI_PROVIDER_KEY");
   });
+
+  it("does NOT fall back to the binding when the gateway config is incomplete", () => {
+    // The default wrangler.jsonc always binds AI, so a fallback here would be
+    // available almost every time — and would answer with a small Workers AI
+    // model while the operator believed they had configured a large one.
+    const backend = resolveBackend(
+      baseEnv({
+        AI_GATEWAY_ID: "my-gw",
+        AI_GATEWAY_ACCOUNT_ID: "acct",
+        AI_MODEL: "openai/gpt-5-mini",
+        AI: makeAiBinding("small model output"),
+        // AI_PROVIDER_KEY deliberately absent
+      }),
+    );
+    expect(backend.kind).toBe("none");
+    if (backend.kind === "none") {
+      expect(backend.reason).toContain("AI_PROVIDER_KEY");
+      expect(backend.reason).toContain("Clear AI_GATEWAY_ID");
+    }
+  });
+
+  it("names every missing gateway field at once", () => {
+    const backend = resolveBackend(baseEnv({ AI_GATEWAY_ID: "my-gw", AI: makeAiBinding("x") }));
+    expect(backend.kind).toBe("none");
+    if (backend.kind === "none") {
+      expect(backend.reason).toContain("AI_GATEWAY_ACCOUNT_ID");
+      expect(backend.reason).toContain("AI_PROVIDER_KEY");
+      expect(backend.reason).toContain("AI_MODEL");
+    }
+  });
+
+  it("uses CF_ACCOUNT_ID as the gateway account when no explicit one is given", () => {
+    const backend = resolveBackend(
+      baseEnv({
+        AI_GATEWAY_ID: "my-gw",
+        CF_ACCOUNT_ID: "from-cf",
+        AI_PROVIDER_KEY: "sk-test",
+        AI_MODEL: "openai/gpt-5-mini",
+      }),
+    );
+    expect(backend.kind).toBe("gateway");
+    if (backend.kind === "gateway") expect(backend.url).toContain("/v1/from-cf/my-gw/");
+  });
 });
 
 describe("compressContent — policy", () => {

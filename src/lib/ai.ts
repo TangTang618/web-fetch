@@ -34,7 +34,7 @@ export type ChatResult =
 
 export type AiBackend =
   | { kind: "gateway"; model: string; url: string; providerKey: string; gatewayToken?: string }
-  | { kind: "binding"; model: string; gatewayId?: string }
+  | { kind: "binding"; model: string }
   | { kind: "none"; reason: string };
 
 /**
@@ -49,18 +49,34 @@ export function resolveBackend(env: Env): AiBackend {
   const providerKey = env.AI_PROVIDER_KEY?.trim();
   const model = env.AI_MODEL?.trim();
 
-  if (gatewayId && accountId && providerKey) {
-    if (!model) {
+  // Setting AI_GATEWAY_ID is an explicit choice of backend, so an incomplete
+  // gateway config is an error to report — never a quiet downgrade to the
+  // Workers AI binding. The binding's models are small; silently answering
+  // with one when the operator asked for gpt-5-mini would misrepresent every
+  // compressed response, and the AI binding is present in the default
+  // wrangler.jsonc, so the downgrade would almost always be available.
+  if (gatewayId) {
+    const missing: string[] = [];
+    if (!accountId) missing.push("AI_GATEWAY_ACCOUNT_ID (or CF_ACCOUNT_ID)");
+    if (!providerKey) missing.push("AI_PROVIDER_KEY");
+    if (!model) missing.push("AI_MODEL (expected `{provider}/{model}`)");
+
+    if (missing.length > 0) {
       return {
         kind: "none",
-        reason: "AI_GATEWAY_ID is set but AI_MODEL is missing (expected `{provider}/{model}`)",
+        reason:
+          `AI_GATEWAY_ID is set but ${missing.join(", ")} ` +
+          `${missing.length === 1 ? "is" : "are"} missing. Compression is disabled rather than ` +
+          `falling back to the smaller Workers AI models, which would silently change the ` +
+          `model behind your results. Clear AI_GATEWAY_ID to use the binding on purpose.`,
       };
     }
+
     return {
       kind: "gateway",
-      model,
+      model: model as string,
       url: `${GATEWAY_BASE}/${accountId}/${gatewayId}/compat/chat/completions`,
-      providerKey,
+      providerKey: providerKey as string,
       gatewayToken: env.AI_GATEWAY_TOKEN?.trim() || undefined,
     };
   }
@@ -69,15 +85,7 @@ export function resolveBackend(env: Env): AiBackend {
     return {
       kind: "binding",
       model: env.WORKERS_AI_MODEL?.trim() || DEFAULT_WORKERS_AI_MODEL,
-      gatewayId: gatewayId && accountId ? gatewayId : undefined,
     };
-  }
-
-  if (gatewayId) {
-    // Gateway was half-configured — say which piece is missing rather than
-    // silently degrading to "compression unavailable".
-    const missing = !accountId ? "AI_GATEWAY_ACCOUNT_ID / CF_ACCOUNT_ID" : "AI_PROVIDER_KEY";
-    return { kind: "none", reason: `AI_GATEWAY_ID is set but ${missing} is missing` };
   }
 
   return { kind: "none", reason: "No AI Gateway configured and no AI binding available" };
@@ -173,12 +181,13 @@ async function callBinding(
     return { ok: false, error: "AI binding is not available" };
   }
 
-  const options = backend.gatewayId ? { gateway: { id: backend.gatewayId } } : undefined;
-  const raw = await env.AI.run(
-    backend.model,
-    { messages, max_tokens: maxTokens, temperature },
-    options,
-  );
+  // Reached only when no gateway is configured, so there is no gateway option
+  // to pass through here.
+  const raw = await env.AI.run(backend.model, {
+    messages,
+    max_tokens: maxTokens,
+    temperature,
+  });
 
   // Workers AI text models return { response: string }; some return a bare string.
   const text =

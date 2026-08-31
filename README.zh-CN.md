@@ -98,7 +98,8 @@ curl https://<你的-worker>.workers.dev/health
 |---|---|
 | `API_KEYS` | **必填。** 逗号分隔的可用 key 列表。 |
 | `CF_ACCOUNT_ID` + `CF_API_TOKEN` | Browser Rendering REST API：crawl、AI 抽取、links、a11y、截图。token 用 "Edit Cloudflare Workers" 模板创建。 |
-| `AI_PROVIDER_KEY` | 走 AI Gateway 做压缩时的上游模型 key。 |
+| `AI_PROVIDER_KEY` | **模型供应商**的 key（比如 OpenAI 的 `sk-…`），压缩用。通常你需要的是这个。 |
+| `AI_GATEWAY_TOKEN` | Cloudflare AI Gateway **自己的**令牌（走 `cf-aig-authorization` 头）。只有把网关切成 authenticated 模式才需要，一般不用设。 |
 
 ### 压缩用哪个模型
 
@@ -116,11 +117,23 @@ curl https://<你的-worker>.workers.dev/health
 
 再加上 `AI_PROVIDER_KEY` 这个 secret。
 
-`AI_GATEWAY_ID` 留空的话会退回 Workers AI binding（默认
+`AI_GATEWAY_ID` **留空**的话会用 Workers AI binding（默认
 `@cf/meta/llama-3.1-8b-instruct-fast`）。那个完全不用配置，但可选模型都很小——
 凡是在意抽取保真度的场景，建议走 Gateway 接大模型。
 
+**填了 `AI_GATEWAY_ID` 就视为你明确选择了 gateway。** 此时如果 `AI_MODEL`、
+`AI_PROVIDER_KEY` 或账号 ID 缺了任何一项，压缩会**直接停用并报出缺什么**，
+而不会偷偷退回 binding——否则你以为在用 gpt-5-mini，实际返回的是 3B 小模型的结果，
+表面上还看不出异常。
+
 要是一个模型都没配，压缩会被跳过、返回完整内容并附带一条 warning。**它永远不会让请求失败。**
+
+想确认当前实际在用哪个后端：
+
+```bash
+curl https://<你的-worker>.workers.dev/health
+# → "compression": { "enabled": true, "backend": "gateway", "model": "openai/gpt-5-mini" }
+```
 
 ## 安全
 

@@ -140,8 +140,8 @@ npx wrangler secret put <NAME>
 |---|---|
 | `API_KEYS` | **Required.** Comma-separated list of accepted keys. |
 | `CF_ACCOUNT_ID` + `CF_API_TOKEN` | Browser Rendering REST API: crawl, AI extract, links, a11y, screenshots. Create the token with the "Edit Cloudflare Workers" template. |
-| `AI_PROVIDER_KEY` | The upstream model key for compression via AI Gateway. |
-| `AI_GATEWAY_TOKEN` | Only if your gateway is set to authenticated mode. |
+| `AI_PROVIDER_KEY` | The **model provider's** key (e.g. an OpenAI `sk-…`) used for compression. This is the one you normally need. |
+| `AI_GATEWAY_TOKEN` | Cloudflare AI Gateway's **own** token, sent as `cf-aig-authorization`. Only needed if you switched that gateway to authenticated mode. |
 
 ### Compression backend
 
@@ -161,13 +161,26 @@ In `wrangler.jsonc`:
 
 plus the `AI_PROVIDER_KEY` secret.
 
-If you leave `AI_GATEWAY_ID` empty, compression falls back to the Workers AI
-binding (`WORKERS_AI_MODEL`, default `@cf/meta/llama-3.1-8b-instruct-fast`).
-That needs no configuration at all, but the models available there are small —
-prefer the Gateway for anything where extraction fidelity matters.
+If you leave `AI_GATEWAY_ID` **empty**, compression uses the Workers AI binding
+(`WORKERS_AI_MODEL`, default `@cf/meta/llama-3.1-8b-instruct-fast`). That needs
+no configuration at all, but the models available there are small — prefer the
+Gateway for anything where extraction fidelity matters.
+
+Setting `AI_GATEWAY_ID` is treated as an explicit choice. If it is set but
+`AI_MODEL`, `AI_PROVIDER_KEY` or the account ID is missing, compression is
+**disabled and the reason reported** — it does not quietly fall back to the
+binding, because that would answer with a much smaller model than you asked
+for while looking like it worked.
 
 If no model is configured at all, compression is skipped and full content is
 returned with a warning. It never fails a request.
+
+Check which backend is live:
+
+```bash
+curl https://<your-worker>.workers.dev/health
+# → "compression": { "enabled": true, "backend": "gateway", "model": "openai/gpt-5-mini" }
+```
 
 ### Tuning
 
