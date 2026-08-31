@@ -1,0 +1,51 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "web-fetch",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Resource IDs are deliberately omitted. Wrangler (>= 4.45) and the
+  // Cloudflare GitHub integration both create these on first deploy and bind
+  // them automatically, so a fresh clone deploys without editing this file.
+  "kv_namespaces": [
+    { "binding": "CACHE" },
+    { "binding": "RATE_LIMIT" }
+  ],
+
+  "r2_buckets": [
+    { "binding": "STORAGE", "bucket_name": "web-fetch-storage" }
+  ],
+
+  // Headless Chrome. Needed for browser interaction and paper-size PDFs;
+  // plain fetching and the REST endpoints work without it.
+  "browser": { "binding": "BROWSER" },
+
+  // Workers AI — the compression fallback when no AI Gateway is configured.
+  "ai": { "binding": "AI" },
+
+  "vars": {
+    // --- Compression ------------------------------------------------------
+    // Leave AI_GATEWAY_ID empty to use the Workers AI binding above. Set it
+    // (plus the AI_PROVIDER_KEY secret and AI_MODEL) to route compression
+    // through AI Gateway to any provider — recommended, since the models on
+    // the binding are small.
+    "AI_GATEWAY_ID": "",
+    // `{provider}/{model}` for the AI Gateway compat endpoint.
+    // e.g. "openai/gpt-5-mini", "google-ai-studio/gemini-2.5-flash",
+    //      "anthropic/claude-haiku-4-5"
+    "AI_MODEL": "",
+    // Used only when falling back to the Workers AI binding.
+    "WORKERS_AI_MODEL": "@cf/meta/llama-3.1-8b-instruct-fast",
+
+    // Content longer than this many tokens is condensed automatically.
+    "COMPRESS_THRESHOLD": "8000",
+    // A `query` triggers extraction once content passes this size.
+    "COMPRESS_QUERY_MIN": "800",
+
+    // "full" (all tools) or "minimal" (core reading tools only).
+    "MCP_TOOLSET": "full"
+  },
+
+  "observability": { "enabled": true }
+}

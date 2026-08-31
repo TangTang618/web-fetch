@@ -2,85 +2,74 @@
 
 ## Scope
 
-This repo has two main contributor surfaces:
+This repo is one Cloudflare Worker, built with TypeScript, Hono, Wrangler and
+Vitest. There is no separate SDK or client package to keep in sync — that is
+deliberate, and new features should land in the Worker rather than in a wrapper
+around it.
 
-- `worker/`: Cloudflare Worker proxy built with TypeScript, Hono, Wrangler, and Vitest
-- `sdk/`: Python SDK built with `httpx`, `pydantic`, `pytest`, and `respx`
-- `mcp-server/`: FastMCP wrapper around the SDK with its own pytest suite
-
-Keep changes focused, add or update tests for behavior changes, and avoid committing secrets or generated credentials.
+Keep changes focused, add or update tests for behavior changes, and avoid
+committing secrets or generated credentials.
 
 ## Prerequisites
 
 - Node.js 18+
-- Python 3.10+
-- Cloudflare account and `wrangler login` if you are working on deployed Worker behavior
+- A Cloudflare account and `npx wrangler login`, if you are working on deployed
+  behavior rather than logic
 
-## Worker Development
+## Development
 
 ```bash
-cd worker
 npm install
-cp wrangler.toml.example wrangler.toml
+npm run dev          # local Worker at http://localhost:8787
 ```
 
-`worker/wrangler.toml` is intentionally gitignored. Keep real namespace IDs, bucket bindings, and account-local config out of commits.
+Local secrets go in `.dev.vars` (gitignored), one `KEY=value` per line:
 
-For local development:
-
-```bash
-npm run dev
+```
+API_KEYS=local-dev-key
+CF_ACCOUNT_ID=...
+CF_API_TOKEN=...
 ```
 
-Before opening a PR for Worker changes, run:
+`wrangler.jsonc` **is** committed, and must stay free of resource IDs, account
+identifiers and tokens — that absence is what lets a fresh clone deploy without
+editing anything.
+
+Before opening a PR:
 
 ```bash
 npm run type-check
 npm test
 ```
 
-## SDK Development
+## Testing notes
 
-```bash
-cd sdk
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-```
+Tests run in plain Node, not workerd. That is a constraint worth preserving: the
+HTML→Markdown converter and the compression policy are written without runtime
+globals so they stay directly unit-testable. If you find yourself reaching for a
+workerd-only API in that core logic, prefer a portable implementation.
 
-Run tests with:
+Route-level tests drive the real Hono app via `app.fetch(request, env)` with
+in-memory fakes for KV and R2 — see `tests/helpers.ts`.
 
-```bash
-pytest tests/ -v
-```
+Network is always mocked. No test may make a real request to Cloudflare or to a
+third-party site.
 
-## MCP Server Development
+## Code style
 
-```bash
-cd mcp-server
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ../sdk
-pip install -e ".[dev]"
-pytest tests/ -v
-```
-
-## Code Style
-
-- Match the existing layout and naming in the package you touch.
-- Keep TypeScript imports explicit and consistent with the current ESM setup.
-- Keep Python code typed; add docstrings for public SDK behavior when needed.
+- Match the existing layout and naming in the file you touch.
+- Keep imports explicit and consistent with the current ESM setup (`.js`
+  extensions on relative imports).
 - Prefer small, targeted changes over broad refactors.
-- Add or update Vitest tests for Worker changes and `pytest` tests for SDK changes.
-- Update README / package README / CHANGELOG entries when public behavior, setup, or response shapes change.
+- Comment the *why* — a non-obvious tradeoff, a workaround, a limit — not the
+  what.
+- Update the README and CHANGELOG when setup, behavior, or response shapes
+  change.
 
-## Pull Requests
+## Pull requests
 
 1. Create a branch from `main`.
 2. Make the smallest change that resolves the issue.
-3. Run the relevant checks:
-   - `cd worker && npm run type-check && npm test`
-   - `cd sdk && pytest tests/ -v`
-   - `cd mcp-server && pytest tests/ -v`
+3. Run `npm run type-check && npm test`.
 4. Update docs if setup, behavior, or API usage changed.
 5. Open a PR with a clear summary, linked issue, and test notes.

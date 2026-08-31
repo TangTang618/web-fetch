@@ -10,14 +10,14 @@ Fetch and convert external documentation to local markdown files for use as cont
 
 ## Prerequisites
 
-CF Browser MCP server must be configured in `.mcp.json` (see [quick start](../../README.md#quick-start)).
+The web-fetch MCP server must be configured in your client (see [Deploy](../../README.md#deploy)).
 
 ## Workflow
 
 ### Step 1: Discover Pages
 
 ```
-browser_links(base_url) → list of all linked pages
+web_links(base_url) → list of all linked pages
 ```
 - Filter to same-domain URLs only
 - Filter by documentation patterns (e.g., /docs/, /guide/, /api/, /reference/)
@@ -27,9 +27,14 @@ browser_links(base_url) → list of all linked pages
 
 For each discovered page:
 ```
-browser_markdown(page_url) → markdown content
+web_fetch(page_url) → markdown content
 ```
 Process pages in parallel where possible (batch of 5).
+
+When the user is fetching docs to answer a specific question rather than to
+archive them, pass that question as `query` on each call. The server returns
+only the relevant passages, which keeps a 20-page crawl inside a usable context
+budget. For archival use, pass `compress: "off"` so pages are stored verbatim.
 
 ### Step 3: Clean Content
 
@@ -77,11 +82,11 @@ Output summary:
 
 ```
 "Fetch the Hono documentation"
-→ browser_links("https://hono.dev") → filter /docs/ → browser_markdown each → save
+→ web_links("https://hono.dev") → filter /docs/ → web_fetch each → save
 
 "Download Cloudflare Workers docs for reference"
-→ browser_links("https://developers.cloudflare.com/workers/") → fetch up to 20 pages
+→ web_links("https://developers.cloudflare.com/workers/") → fetch up to 20 pages
 
 "Index the Astro guide for RAG"
-→ browser_links("https://docs.astro.build/") → fetch + clean + save with index
+→ web_links("https://docs.astro.build/") → fetch + clean + save with index
 ```

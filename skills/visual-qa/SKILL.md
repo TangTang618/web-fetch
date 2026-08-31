@@ -10,7 +10,7 @@ Automated visual quality assurance using multi-viewport screenshots.
 
 ## Prerequisites
 
-CF Browser MCP server must be configured in `.mcp.json` (see [quick start](../../README.md#quick-start)).
+The web-fetch MCP server must be configured in your client (see [Deploy](../../README.md#deploy)).
 
 ## Workflow
 
@@ -18,7 +18,7 @@ CF Browser MCP server must be configured in `.mcp.json` (see [quick start](../..
 
 From user input, determine which pages to check:
 - Single URL: screenshot that page
-- Site URL: use `browser_links` to discover key pages (homepage, about, pricing, etc.), cap at 10
+- Site URL: use `web_links` to discover key pages (homepage, about, pricing, etc.), cap at 10
 - URL list: use provided list directly
 
 ### Step 2: Define Viewports
@@ -36,7 +36,7 @@ Default viewports (user can override):
 
 For each page + viewport combination:
 ```
-browser_screenshot(url, width=W, height=H)
+web_screenshot(url, width=W, height=H)
 → Save PNG to screenshots/{page-slug}/{viewport-name}.png
 ```
 
@@ -99,8 +99,8 @@ Output a markdown report:
 → 2 viewport screenshots + review
 
 "Visual QA the entire site after deploy"
-→ Discover pages via browser_links → screenshot each at 4 viewports → report
+→ Discover pages via web_links → screenshot each at 4 viewports → report
 
 "Full-page screenshot of the docs"
-→ browser_screenshot(url, full_page=True) at each viewport
+→ web_screenshot(url, full_page=True) at each viewport
 ```

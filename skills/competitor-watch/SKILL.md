@@ -10,11 +10,11 @@ Extract and compare structured data from multiple websites side-by-side.
 
 ## Prerequisites
 
-CF Browser MCP server must be configured in `.mcp.json` (see [quick start](../../README.md#quick-start)).
+The web-fetch MCP server must be configured in your client (see [Deploy](../../README.md#deploy)).
 
 ## Why This Skill?
 
-Pricing pages, feature matrices, and product comparisons are almost always JS-rendered. This skill uses `browser_json` and `browser_scrape` to extract structured data from multiple competitor pages, then generates a comparison.
+Pricing pages, feature matrices, and product comparisons are almost always JS-rendered. This skill uses `web_extract` and `web_scrape` to extract structured data from multiple competitor pages, then generates a comparison.
 
 ## Workflow
 
@@ -31,17 +31,17 @@ For each competitor page, use the most appropriate tool:
 
 **Pricing data:**
 ```
-browser_json(url, prompt="Extract all pricing tiers with: plan name, monthly price, annual price, key features, and limits")
+web_extract(url, prompt="Extract all pricing tiers with: plan name, monthly price, annual price, key features, and limits")
 ```
 
 **Feature comparison:**
 ```
-browser_json(url, prompt="Extract all features with: feature name, availability (yes/no/limited), and any limits or quotas")
+web_extract(url, prompt="Extract all features with: feature name, availability (yes/no/limited), and any limits or quotas")
 ```
 
 **General product info:**
 ```
-browser_scrape(url, selectors=["h1", ".pricing-card", ".feature-list", "[class*=plan]"])
+web_scrape(url, selectors=["h1", ".pricing-card", ".feature-list", "[class*=plan]"])
 ```
 
 ### Step 3: Normalize
@@ -82,7 +82,7 @@ Output a markdown comparison table:
 
 ```
 "Compare Vercel vs Netlify vs Cloudflare Pages pricing"
-→ browser_json on each /pricing page → normalized comparison table
+→ web_extract on each /pricing page → normalized comparison table
 
 "What features does Cursor have that Copilot doesn't?"
 → Extract feature lists from both → diff analysis
