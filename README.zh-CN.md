@@ -135,6 +135,29 @@ curl https://<你的-worker>.workers.dev/health
 两个都设也可以，各走各的头。**没配 provider key 时不会发 `Authorization` 头**——
 正是这一点让网关能够代为提供上游凭据。
 
+### 模型不支持 chat completions 怎么办
+
+统一端点吃的是 Chat Completions 的形状。有些模型**只在 OpenAI 的 Responses API 上提供**，
+也有人想直接用 Anthropic 原生的 Messages API。用 `AI_API_STYLE` 切换：
+
+| `AI_API_STYLE` | 端点 | `AI_MODEL` 写法 | 凭据头 |
+|---|---|---|---|
+| `chat`（默认） | `/compat/chat/completions` | `{provider}/{model}` | `Authorization: Bearer` |
+| `responses` | `/openai/responses` | OpenAI 裸模型 id | `Authorization: Bearer` |
+| `messages` | `/anthropic/v1/messages` | Anthropic 裸模型 id | `x-api-key` |
+
+```jsonc
+"AI_API_STYLE": "responses",
+"AI_MODEL": "<模型 id>"      // 这两种 style 下不要带 provider 前缀
+```
+
+`cf-aig-authorization` 在三种 style 下行为一致，所以 BYOK 网关依然只需要
+`AI_GATEWAY_TOKEN` 一把。
+
+两个细节：`responses` 这种 style **不发 `temperature`**，因为只在 Responses API
+上提供的模型多半是推理模型，会直接拒绝采样参数；另外 style 和模型对不上时，
+报错会**点名当前配置的 style**，而不是丢给你一个莫名其妙的空回复。
+
 `AI_GATEWAY_ID` **留空**的话会用 Workers AI binding（默认
 `@cf/meta/llama-3.1-8b-instruct-fast`）。那个完全不用配置，但可选模型都很小——
 凡是在意抽取保真度的场景，建议走 Gateway 接大模型。

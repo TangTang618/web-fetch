@@ -16,8 +16,17 @@ export type Env = {
   AI_GATEWAY_ID?: string;
   /** Account ID for the Gateway URL. Falls back to CF_ACCOUNT_ID. */
   AI_GATEWAY_ACCOUNT_ID?: string;
-  /** Model for compression, `{provider}/{model}` for the Gateway compat API. */
+  /**
+   * Model for compression. `{provider}/{model}` for the unified chat API;
+   * the provider's own bare model id for the `responses` / `messages` styles.
+   */
   AI_MODEL?: string;
+  /**
+   * Which API shape the model speaks: `chat` (default, AI Gateway's unified
+   * endpoint), `responses` (OpenAI Responses API), or `messages` (Anthropic
+   * Messages API).
+   */
+  AI_API_STYLE?: string;
   /** Fallback model id used with the Workers AI binding. */
   WORKERS_AI_MODEL?: string;
   /** Token count above which content is auto-compressed. Default 8000. */

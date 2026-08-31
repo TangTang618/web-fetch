@@ -55,10 +55,10 @@ describe("resolveBackend", () => {
     );
     expect(backend.kind).toBe("gateway");
     if (backend.kind === "gateway") {
-      expect(backend.url).toBe(
-        "https://gateway.ai.cloudflare.com/v1/acct/my-gw/compat/chat/completions",
-      );
+      expect(backend.accountId).toBe("acct");
+      expect(backend.gatewayId).toBe("my-gw");
       expect(backend.model).toBe("openai/gpt-5-mini");
+      expect(backend.style).toBe("chat");
     }
   });
 
@@ -132,7 +132,7 @@ describe("resolveBackend", () => {
       }),
     );
     expect(backend.kind).toBe("gateway");
-    if (backend.kind === "gateway") expect(backend.url).toContain("/v1/from-cf/my-gw/");
+    if (backend.kind === "gateway") expect(backend.accountId).toBe("from-cf");
   });
 });
 
