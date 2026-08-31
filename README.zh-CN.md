@@ -98,8 +98,8 @@ curl https://<你的-worker>.workers.dev/health
 |---|---|
 | `API_KEYS` | **必填。** 逗号分隔的可用 key 列表。 |
 | `CF_ACCOUNT_ID` + `CF_API_TOKEN` | Browser Rendering REST API：crawl、AI 抽取、links、a11y、截图。token 用 "Edit Cloudflare Workers" 模板创建。 |
-| `AI_PROVIDER_KEY` | **模型供应商**的 key（比如 OpenAI 的 `sk-…`），压缩用。通常你需要的是这个。 |
-| `AI_GATEWAY_TOKEN` | Cloudflare AI Gateway **自己的**令牌（走 `cf-aig-authorization` 头）。只有把网关切成 authenticated 模式才需要，一般不用设。 |
+| `AI_PROVIDER_KEY` | **模型供应商**的 key（比如 OpenAI 的 `sk-…`）。只有在网关本身不持有 provider 凭据时才需要。 |
+| `AI_GATEWAY_TOKEN` | Cloudflare AI Gateway **自己的**令牌（走 `cf-aig-authorization` 头）。网关开了鉴权时需要；如果网关自己存着 provider key，**这一把就够了**。 |
 
 ### 压缩用哪个模型
 
@@ -111,11 +111,29 @@ curl https://<你的-worker>.workers.dev/health
 ```jsonc
 "vars": {
   "AI_GATEWAY_ID": "my-gateway",
-  "AI_MODEL": "openai/gpt-5-mini"   // 或 google-ai-studio/gemini-2.5-flash、anthropic/claude-haiku-4-5 …
+  "AI_GATEWAY_ACCOUNT_ID": "<账号 id>",  // 已设 CF_ACCOUNT_ID 的话可省略
+  "AI_MODEL": "openai/gpt-5-mini"        // 或 google-ai-studio/gemini-2.5-flash、anthropic/claude-haiku-4-5 …
 }
 ```
 
-再加上 `AI_PROVIDER_KEY` 这个 secret。
+再按你的网关配置方式，设**其中一把** key：
+
+- **网关自己持有 provider key**（[BYOK](https://developers.cloudflare.com/ai-gateway/configuration/bring-your-own-keys/)
+  或 [Unified Billing](https://developers.cloudflare.com/ai-gateway/features/unified-billing/)）——
+  一把 Cloudflare token 管所有供应商，换模型只改 `AI_MODEL`：
+
+  ```bash
+  npx wrangler secret put AI_GATEWAY_TOKEN
+  ```
+
+- **你自己带 provider key**（传统方式）：
+
+  ```bash
+  npx wrangler secret put AI_PROVIDER_KEY
+  ```
+
+两个都设也可以，各走各的头。**没配 provider key 时不会发 `Authorization` 头**——
+正是这一点让网关能够代为提供上游凭据。
 
 `AI_GATEWAY_ID` **留空**的话会用 Workers AI binding（默认
 `@cf/meta/llama-3.1-8b-instruct-fast`）。那个完全不用配置，但可选模型都很小——

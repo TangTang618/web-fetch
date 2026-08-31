@@ -140,8 +140,8 @@ npx wrangler secret put <NAME>
 |---|---|
 | `API_KEYS` | **Required.** Comma-separated list of accepted keys. |
 | `CF_ACCOUNT_ID` + `CF_API_TOKEN` | Browser Rendering REST API: crawl, AI extract, links, a11y, screenshots. Create the token with the "Edit Cloudflare Workers" template. |
-| `AI_PROVIDER_KEY` | The **model provider's** key (e.g. an OpenAI `sk-…`) used for compression. This is the one you normally need. |
-| `AI_GATEWAY_TOKEN` | Cloudflare AI Gateway's **own** token, sent as `cf-aig-authorization`. Only needed if you switched that gateway to authenticated mode. |
+| `AI_PROVIDER_KEY` | The **model provider's** key (e.g. an OpenAI `sk-…`). Needed only if the gateway does not already hold provider credentials. |
+| `AI_GATEWAY_TOKEN` | Cloudflare AI Gateway's **own** token, sent as `cf-aig-authorization`. Needed for an authenticated gateway, and it is the only credential required when the gateway holds the provider key itself. |
 
 ### Compression backend
 
@@ -155,11 +155,31 @@ In `wrangler.jsonc`:
 ```jsonc
 "vars": {
   "AI_GATEWAY_ID": "my-gateway",
-  "AI_MODEL": "openai/gpt-5-mini"   // or google-ai-studio/gemini-2.5-flash, anthropic/claude-haiku-4-5, …
+  "AI_GATEWAY_ACCOUNT_ID": "<account id>",  // omit if CF_ACCOUNT_ID is set
+  "AI_MODEL": "openai/gpt-5-mini"           // or google-ai-studio/gemini-2.5-flash, anthropic/claude-haiku-4-5, …
 }
 ```
 
-plus the `AI_PROVIDER_KEY` secret.
+plus **one** credential, depending on how your gateway is set up:
+
+- **The gateway holds the provider key** — via [BYOK](https://developers.cloudflare.com/ai-gateway/configuration/bring-your-own-keys/)
+  or [Unified Billing](https://developers.cloudflare.com/ai-gateway/features/unified-billing/).
+  One Cloudflare token covers every provider, and you switch models by editing
+  `AI_MODEL` alone:
+
+  ```bash
+  npx wrangler secret put AI_GATEWAY_TOKEN
+  ```
+
+- **You pass the provider key yourself** — the classic setup:
+
+  ```bash
+  npx wrangler secret put AI_PROVIDER_KEY
+  ```
+
+Setting both is fine; each is sent as its own header. When no provider key is
+configured, no `Authorization` header is sent at all, which is what lets the
+gateway supply the upstream credential.
 
 If you leave `AI_GATEWAY_ID` **empty**, compression uses the Workers AI binding
 (`WORKERS_AI_MODEL`, default `@cf/meta/llama-3.1-8b-instruct-fast`). That needs

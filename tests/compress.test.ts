@@ -75,6 +75,23 @@ describe("resolveBackend", () => {
     if (backend.kind === "none") expect(backend.reason).toContain("AI_PROVIDER_KEY");
   });
 
+  it("accepts a gateway token alone, for gateways holding the provider key (BYOK)", () => {
+    const backend = resolveBackend(
+      baseEnv({
+        AI_GATEWAY_ID: "my-gateway",
+        AI_GATEWAY_ACCOUNT_ID: "acct",
+        AI_MODEL: "openai/gpt-5-mini",
+        AI_GATEWAY_TOKEN: "cf-aig-token",
+        // No AI_PROVIDER_KEY: the gateway supplies the upstream credential.
+      }),
+    );
+    expect(backend.kind).toBe("gateway");
+    if (backend.kind === "gateway") {
+      expect(backend.gatewayToken).toBe("cf-aig-token");
+      expect(backend.providerKey).toBeUndefined();
+    }
+  });
+
   it("does NOT fall back to the binding when the gateway config is incomplete", () => {
     // The default wrangler.jsonc always binds AI, so a fallback here would be
     // available almost every time — and would answer with a small Workers AI
@@ -90,7 +107,7 @@ describe("resolveBackend", () => {
     );
     expect(backend.kind).toBe("none");
     if (backend.kind === "none") {
-      expect(backend.reason).toContain("AI_PROVIDER_KEY");
+      expect(backend.reason).toContain("AI_PROVIDER_KEY or AI_GATEWAY_TOKEN");
       expect(backend.reason).toContain("Clear AI_GATEWAY_ID");
     }
   });

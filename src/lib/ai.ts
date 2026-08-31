@@ -33,7 +33,11 @@ export type ChatResult =
   | { ok: false; error: string };
 
 export type AiBackend =
-  | { kind: "gateway"; model: string; url: string; providerKey: string; gatewayToken?: string }
+  /**
+   * At least one of `providerKey` / `gatewayToken` is always set. Which one
+   * depends on how the gateway holds credentials — see `resolveBackend`.
+   */
+  | { kind: "gateway"; model: string; url: string; providerKey?: string; gatewayToken?: string }
   | { kind: "binding"; model: string }
   | { kind: "none"; reason: string };
 
@@ -56,10 +60,18 @@ export function resolveBackend(env: Env): AiBackend {
   // compressed response, and the AI binding is present in the default
   // wrangler.jsonc, so the downgrade would almost always be available.
   if (gatewayId) {
+    const gatewayToken = env.AI_GATEWAY_TOKEN?.trim();
+
     const missing: string[] = [];
     if (!accountId) missing.push("AI_GATEWAY_ACCOUNT_ID (or CF_ACCOUNT_ID)");
-    if (!providerKey) missing.push("AI_PROVIDER_KEY");
     if (!model) missing.push("AI_MODEL (expected `{provider}/{model}`)");
+    // Either credential is sufficient on its own. A gateway holding the
+    // provider's key itself — via BYOK or Unified Billing — is authenticated
+    // with AI_GATEWAY_TOKEN alone, and requiring a provider key there would
+    // lock out the setup Cloudflare recommends.
+    if (!providerKey && !gatewayToken) {
+      missing.push("AI_PROVIDER_KEY or AI_GATEWAY_TOKEN");
+    }
 
     if (missing.length > 0) {
       return {
@@ -76,8 +88,8 @@ export function resolveBackend(env: Env): AiBackend {
       kind: "gateway",
       model: model as string,
       url: `${GATEWAY_BASE}/${accountId}/${gatewayId}/compat/chat/completions`,
-      providerKey: providerKey as string,
-      gatewayToken: env.AI_GATEWAY_TOKEN?.trim() || undefined,
+      ...(providerKey ? { providerKey } : {}),
+      ...(gatewayToken ? { gatewayToken } : {}),
     };
   }
 
@@ -125,10 +137,15 @@ async function callGateway(
   maxTokens: number,
   temperature: number,
 ): Promise<ChatResult> {
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${backend.providerKey}`,
-    "Content-Type": "application/json",
-  };
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+
+  // Only send a provider Authorization header when there is a provider key to
+  // send. With BYOK or Unified Billing the gateway supplies the upstream
+  // credential itself, and an empty or placeholder Bearer would at best be
+  // ignored and at worst be forwarded to the provider as a bad key.
+  if (backend.providerKey) {
+    headers.Authorization = `Bearer ${backend.providerKey}`;
+  }
   if (backend.gatewayToken) {
     headers["cf-aig-authorization"] = `Bearer ${backend.gatewayToken}`;
   }
