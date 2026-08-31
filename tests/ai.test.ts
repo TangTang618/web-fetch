@@ -5,8 +5,28 @@
  * at all, and the two supported setups need different ones.
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { chat } from "../src/lib/ai.js";
+import { chat, resolveBackend } from "../src/lib/ai.js";
+import { extractText } from "../src/lib/ai-styles.js";
 import { baseEnv, makeAiBinding } from "./helpers.js";
+
+function bodyOf(mock: ReturnType<typeof vi.fn>): Record<string, any> {
+  return JSON.parse((mock.mock.calls[0]?.[1] as RequestInit).body as string);
+}
+
+function urlOf(mock: ReturnType<typeof vi.fn>): string {
+  return String(mock.mock.calls[0]?.[0]);
+}
+
+function stubJson(payload: unknown) {
+  const mock = vi.fn(async () =>
+    new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+  vi.stubGlobal("fetch", mock);
+  return mock;
+}
 
 function stubCompletion(body = "compressed output") {
   const mock = vi.fn(async () =>
@@ -108,6 +128,122 @@ describe("chat — AI Gateway", () => {
       { role: "user", content: "hi" },
     ]);
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("chat — API styles", () => {
+  const SYSTEM = "You extract things.";
+  const USER = "Question: price?\n\nPage content: …";
+
+  it('posts Responses-API shape and reads `output` blocks for style "responses"', async () => {
+    const mock = stubJson({
+      output: [
+        { type: "message", content: [{ type: "output_text", text: "The answer." }] },
+      ],
+    });
+
+    const result = await chat(
+      baseEnv({ ...GATEWAY, AI_API_STYLE: "responses", AI_GATEWAY_TOKEN: "cf-token" }),
+      [{ role: "system", content: SYSTEM }, { role: "user", content: USER }],
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.text).toBe("The answer.");
+
+    expect(urlOf(mock)).toBe(
+      "https://gateway.ai.cloudflare.com/v1/d121aa7c/my-gateway/openai/responses",
+    );
+    const body = bodyOf(mock);
+    // System prompt is a first-class field here, not a message.
+    expect(body.instructions).toBe(SYSTEM);
+    expect(body.input).toBe(USER);
+    expect(body.max_output_tokens).toBeGreaterThan(0);
+    expect(body.messages).toBeUndefined();
+    // Reasoning models on this API reject sampling params.
+    expect(body.temperature).toBeUndefined();
+  });
+
+  it('reads the flattened `output_text` when a gateway returns it', () => {
+    expect(extractText("responses", { output_text: "flattened" })).toBe("flattened");
+  });
+
+  it('posts Messages-API shape and reads content blocks for style "messages"', async () => {
+    const mock = stubJson({ content: [{ type: "text", text: "Anthropic says hi." }] });
+
+    const result = await chat(
+      baseEnv({
+        ...GATEWAY,
+        AI_API_STYLE: "messages",
+        AI_MODEL: "claude-haiku-4-5",
+        AI_PROVIDER_KEY: "sk-ant-test",
+      }),
+      [{ role: "system", content: SYSTEM }, { role: "user", content: USER }],
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.text).toBe("Anthropic says hi.");
+
+    expect(urlOf(mock)).toBe(
+      "https://gateway.ai.cloudflare.com/v1/d121aa7c/my-gateway/anthropic/v1/messages",
+    );
+
+    const headers = headersOf(mock);
+    // Anthropic authenticates with x-api-key, never a Bearer token.
+    expect(headers["x-api-key"]).toBe("sk-ant-test");
+    expect(headers.Authorization).toBeUndefined();
+    expect(headers["anthropic-version"]).toBe("2023-06-01");
+
+    const body = bodyOf(mock);
+    expect(body.system).toBe(SYSTEM);
+    expect(body.messages).toEqual([{ role: "user", content: USER }]);
+    expect(body.max_tokens).toBeGreaterThan(0); // required by this API
+  });
+
+  it("still sends only the gateway token for messages style under BYOK", async () => {
+    const mock = stubJson({ content: [{ type: "text", text: "ok" }] });
+    await chat(
+      baseEnv({
+        ...GATEWAY,
+        AI_API_STYLE: "messages",
+        AI_MODEL: "claude-haiku-4-5",
+        AI_GATEWAY_TOKEN: "cf-token",
+      }),
+      [{ role: "user", content: USER }],
+    );
+
+    const headers = headersOf(mock);
+    expect(headers["cf-aig-authorization"]).toBe("Bearer cf-token");
+    expect(headers["x-api-key"]).toBeUndefined();
+  });
+
+  it("rejects an unknown style instead of guessing one", () => {
+    const backend = resolveBackend(baseEnv({ ...GATEWAY, AI_API_STYLE: "grpc" }));
+    expect(backend.kind).toBe("none");
+    if (backend.kind === "none") expect(backend.reason).toContain("AI_API_STYLE");
+  });
+
+  it("names the style when the response shape does not match", async () => {
+    // Chat-shaped reply while configured for `responses` — the usual symptom
+    // of AI_API_STYLE not matching the model.
+    stubJson({ choices: [{ message: { content: "chat shaped" } }] });
+    const result = await chat(
+      baseEnv({ ...GATEWAY, AI_API_STYLE: "responses", AI_GATEWAY_TOKEN: "cf-token" }),
+      [{ role: "user", content: USER }],
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('AI_API_STYLE="responses"');
+      expect(result.error).toContain("matches the model's API");
+    }
+  });
+
+  it("defaults to the chat style when AI_API_STYLE is unset", async () => {
+    const mock = stubJson({ choices: [{ message: { content: "hi" } }] });
+    await chat(baseEnv({ ...GATEWAY, AI_GATEWAY_TOKEN: "cf-token" }), [
+      { role: "user", content: USER },
+    ]);
+    expect(urlOf(mock)).toContain("/compat/chat/completions");
   });
 });
 

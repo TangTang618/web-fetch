@@ -3,10 +3,12 @@
  *
  * Two backends, picked in this order:
  *
- *   1. **AI Gateway** (preferred) — the OpenAI-compatible unified endpoint at
- *      `/v1/{account}/{gateway}/compat/chat/completions`.  Any provider works
- *      by changing `AI_MODEL` to `{provider}/{model}`, e.g. `openai/gpt-5-mini`
- *      or `google-ai-studio/gemini-2.5-flash`, and everything inherits the
+ *   1. **AI Gateway** (preferred) — by default the OpenAI-compatible unified
+ *      endpoint, where any provider works by changing `AI_MODEL` to
+ *      `{provider}/{model}`, e.g. `openai/gpt-5-mini` or
+ *      `google-ai-studio/gemini-2.5-flash`. Models that only speak OpenAI's
+ *      Responses API, or callers who want Anthropic's native Messages API,
+ *      set `AI_API_STYLE` — see `ai-styles.ts`. Every style inherits the
  *      Gateway's caching, logging, rate limiting and guardrails.
  *      Docs: https://developers.cloudflare.com/ai-gateway/usage/chat-completion/
  *
@@ -20,6 +22,13 @@
  */
 
 import type { Env } from "../types.js";
+import {
+  buildRequest,
+  extractError,
+  extractText,
+  isApiStyle,
+  type ApiStyle,
+} from "./ai-styles.js";
 
 export const DEFAULT_WORKERS_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
 
@@ -37,7 +46,15 @@ export type AiBackend =
    * At least one of `providerKey` / `gatewayToken` is always set. Which one
    * depends on how the gateway holds credentials — see `resolveBackend`.
    */
-  | { kind: "gateway"; model: string; url: string; providerKey?: string; gatewayToken?: string }
+  | {
+      kind: "gateway";
+      model: string;
+      style: ApiStyle;
+      accountId: string;
+      gatewayId: string;
+      providerKey?: string;
+      gatewayToken?: string;
+    }
   | { kind: "binding"; model: string }
   | { kind: "none"; reason: string };
 
@@ -62,9 +79,25 @@ export function resolveBackend(env: Env): AiBackend {
   if (gatewayId) {
     const gatewayToken = env.AI_GATEWAY_TOKEN?.trim();
 
+    const rawStyle = env.AI_API_STYLE?.trim().toLowerCase() || "chat";
+    if (!isApiStyle(rawStyle)) {
+      return {
+        kind: "none",
+        reason: `AI_API_STYLE must be one of chat, responses, messages (got "${rawStyle}")`,
+      };
+    }
+
     const missing: string[] = [];
     if (!accountId) missing.push("AI_GATEWAY_ACCOUNT_ID (or CF_ACCOUNT_ID)");
-    if (!model) missing.push("AI_MODEL (expected `{provider}/{model}`)");
+    if (!model) {
+      // The unified endpoint routes on a `{provider}/{model}` name; the
+      // provider-specific paths take the provider's own bare model id.
+      missing.push(
+        rawStyle === "chat"
+          ? "AI_MODEL (expected `{provider}/{model}`)"
+          : "AI_MODEL (the provider's own model id)",
+      );
+    }
     // Either credential is sufficient on its own. A gateway holding the
     // provider's key itself — via BYOK or Unified Billing — is authenticated
     // with AI_GATEWAY_TOKEN alone, and requiring a provider key there would
@@ -87,7 +120,9 @@ export function resolveBackend(env: Env): AiBackend {
     return {
       kind: "gateway",
       model: model as string,
-      url: `${GATEWAY_BASE}/${accountId}/${gatewayId}/compat/chat/completions`,
+      style: rawStyle,
+      accountId: accountId as string,
+      gatewayId,
       ...(providerKey ? { providerKey } : {}),
       ...(gatewayToken ? { gatewayToken } : {}),
     };
@@ -137,54 +172,59 @@ async function callGateway(
   maxTokens: number,
   temperature: number,
 ): Promise<ChatResult> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  // The style owns the URL, the auth header, the body shape and where the
+  // answer lives; everything below is shape-agnostic.
+  const request = buildRequest(backend.style, {
+    gatewayBase: GATEWAY_BASE,
+    accountId: backend.accountId,
+    gatewayId: backend.gatewayId,
+    model: backend.model,
+    system: messages.find((m) => m.role === "system")?.content ?? "",
+    user: messages
+      .filter((m) => m.role === "user")
+      .map((m) => m.content)
+      .join("\n\n"),
+    maxTokens,
+    temperature,
+    ...(backend.providerKey ? { providerKey: backend.providerKey } : {}),
+    ...(backend.gatewayToken ? { gatewayToken: backend.gatewayToken } : {}),
+  });
 
-  // Only send a provider Authorization header when there is a provider key to
-  // send. With BYOK or Unified Billing the gateway supplies the upstream
-  // credential itself, and an empty or placeholder Bearer would at best be
-  // ignored and at worst be forwarded to the provider as a bad key.
-  if (backend.providerKey) {
-    headers.Authorization = `Bearer ${backend.providerKey}`;
-  }
-  if (backend.gatewayToken) {
-    headers["cf-aig-authorization"] = `Bearer ${backend.gatewayToken}`;
-  }
-
-  const res = await fetch(backend.url, {
+  const res = await fetch(request.url, {
     method: "POST",
-    headers,
-    body: JSON.stringify({
-      model: backend.model,
-      messages,
-      max_tokens: maxTokens,
-      temperature,
-    }),
+    headers: request.headers,
+    body: JSON.stringify(request.body),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 
   if (!res.ok) {
     const raw = await res.text().catch(() => res.statusText);
-    let message = raw;
-    try {
-      const parsed = JSON.parse(raw) as { error?: { message?: string } | string };
-      message =
-        typeof parsed.error === "string"
-          ? parsed.error
-          : parsed.error?.message ?? raw;
-    } catch {
-      /* keep raw text */
-    }
-    return { ok: false, error: `AI Gateway ${res.status}: ${message}`.slice(0, 500) };
+    return {
+      ok: false,
+      error: `AI Gateway ${res.status} (${backend.style}): ${extractError(raw)}`.slice(0, 500),
+    };
   }
 
-  const body = (await res.json()) as {
-    choices?: Array<{ message?: { content?: unknown } }>;
-  };
-  const content = body.choices?.[0]?.message?.content;
-  if (typeof content !== "string" || !content.trim()) {
-    return { ok: false, error: "AI Gateway returned an empty completion" };
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    return { ok: false, error: `AI Gateway returned a non-JSON body (${backend.style})` };
   }
-  return { ok: true, text: content, model: backend.model };
+
+  const text = extractText(backend.style, body);
+  if (text === null) {
+    // A shape mismatch looks exactly like an empty answer from here, so name
+    // the style: it is almost always the wrong AI_API_STYLE for the model.
+    return {
+      ok: false,
+      error:
+        `AI Gateway returned no usable text for AI_API_STYLE="${backend.style}". ` +
+        `Check that the style matches the model's API.`,
+    };
+  }
+
+  return { ok: true, text, model: backend.model };
 }
 
 async function callBinding(

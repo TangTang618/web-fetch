@@ -31,10 +31,20 @@
     // through AI Gateway to any provider — recommended, since the models on
     // the binding are small.
     "AI_GATEWAY_ID": "",
-    // `{provider}/{model}` for the AI Gateway compat endpoint.
-    // e.g. "openai/gpt-5-mini", "google-ai-studio/gemini-2.5-flash",
-    //      "anthropic/claude-haiku-4-5"
+    // The model to compress with. Its form depends on AI_API_STYLE below.
+    // For the default "chat" style: `{provider}/{model}`, e.g.
+    //   "openai/gpt-5-mini", "google-ai-studio/gemini-2.5-flash",
+    //   "anthropic/claude-haiku-4-5"
     "AI_MODEL": "",
+
+    // Which API shape the model speaks:
+    //   "chat"      (default) AI Gateway's unified /compat/chat/completions.
+    //               Works for most models. AI_MODEL is `{provider}/{model}`.
+    //   "responses" OpenAI's Responses API, for models available only there.
+    //               AI_MODEL is the bare OpenAI model id.
+    //   "messages"  Anthropic's native Messages API.
+    //               AI_MODEL is the bare Anthropic model id.
+    "AI_API_STYLE": "chat",
     // Used only when falling back to the Workers AI binding.
     "WORKERS_AI_MODEL": "@cf/meta/llama-3.1-8b-instruct-fast",
 

@@ -181,6 +181,32 @@ Setting both is fine; each is sent as its own header. When no provider key is
 configured, no `Authorization` header is sent at all, which is what lets the
 gateway supply the upstream credential.
 
+#### Models that don't speak chat completions
+
+The unified endpoint takes the Chat Completions shape. Some models are only
+available through OpenAI's **Responses API**, and some callers would rather use
+Anthropic's native **Messages API**. `AI_API_STYLE` selects the shape:
+
+| `AI_API_STYLE` | Endpoint | `AI_MODEL` | Credential header |
+|---|---|---|---|
+| `chat` (default) | `/compat/chat/completions` | `{provider}/{model}` | `Authorization: Bearer` |
+| `responses` | `/openai/responses` | bare OpenAI model id | `Authorization: Bearer` |
+| `messages` | `/anthropic/v1/messages` | bare Anthropic model id | `x-api-key` |
+
+```jsonc
+"AI_API_STYLE": "responses",
+"AI_MODEL": "<the model id>"      // no provider prefix on this style
+```
+
+`cf-aig-authorization` works the same in all three, so a BYOK gateway still
+needs only `AI_GATEWAY_TOKEN`.
+
+Two details worth knowing: the `responses` style does not send `temperature`,
+because the models that are Responses-only tend to be reasoning models that
+reject sampling parameters; and if the style does not match the model, the
+error names the configured style rather than reporting a mysteriously empty
+answer.
+
 If you leave `AI_GATEWAY_ID` **empty**, compression uses the Workers AI binding
 (`WORKERS_AI_MODEL`, default `@cf/meta/llama-3.1-8b-instruct-fast`). That needs
 no configuration at all, but the models available there are small — prefer the
@@ -206,6 +232,7 @@ curl https://<your-worker>.workers.dev/health
 
 | Var | Default | Meaning |
 |---|---|---|
+| `AI_API_STYLE` | `chat` | API shape: `chat`, `responses`, or `messages`. |
 | `COMPRESS_THRESHOLD` | `8000` | Tokens above which content is auto-condensed. |
 | `COMPRESS_QUERY_MIN` | `800` | Tokens above which a `query` triggers extraction. |
 | `MCP_TOOLSET` | `full` | `minimal` advertises only the core reading tools. |
