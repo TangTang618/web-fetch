@@ -33,8 +33,12 @@ export type ChatResult =
   | { ok: false; error: string };
 
 export type AiBackend =
-  | { kind: "gateway"; model: string; url: string; providerKey: string; gatewayToken?: string }
-  | { kind: "binding"; model: string; gatewayId?: string }
+  /**
+   * At least one of `providerKey` / `gatewayToken` is always set. Which one
+   * depends on how the gateway holds credentials — see `resolveBackend`.
+   */
+  | { kind: "gateway"; model: string; url: string; providerKey?: string; gatewayToken?: string }
+  | { kind: "binding"; model: string }
   | { kind: "none"; reason: string };
 
 /**
@@ -49,19 +53,43 @@ export function resolveBackend(env: Env): AiBackend {
   const providerKey = env.AI_PROVIDER_KEY?.trim();
   const model = env.AI_MODEL?.trim();
 
-  if (gatewayId && accountId && providerKey) {
-    if (!model) {
+  // Setting AI_GATEWAY_ID is an explicit choice of backend, so an incomplete
+  // gateway config is an error to report — never a quiet downgrade to the
+  // Workers AI binding. The binding's models are small; silently answering
+  // with one when the operator asked for gpt-5-mini would misrepresent every
+  // compressed response, and the AI binding is present in the default
+  // wrangler.jsonc, so the downgrade would almost always be available.
+  if (gatewayId) {
+    const gatewayToken = env.AI_GATEWAY_TOKEN?.trim();
+
+    const missing: string[] = [];
+    if (!accountId) missing.push("AI_GATEWAY_ACCOUNT_ID (or CF_ACCOUNT_ID)");
+    if (!model) missing.push("AI_MODEL (expected `{provider}/{model}`)");
+    // Either credential is sufficient on its own. A gateway holding the
+    // provider's key itself — via BYOK or Unified Billing — is authenticated
+    // with AI_GATEWAY_TOKEN alone, and requiring a provider key there would
+    // lock out the setup Cloudflare recommends.
+    if (!providerKey && !gatewayToken) {
+      missing.push("AI_PROVIDER_KEY or AI_GATEWAY_TOKEN");
+    }
+
+    if (missing.length > 0) {
       return {
         kind: "none",
-        reason: "AI_GATEWAY_ID is set but AI_MODEL is missing (expected `{provider}/{model}`)",
+        reason:
+          `AI_GATEWAY_ID is set but ${missing.join(", ")} ` +
+          `${missing.length === 1 ? "is" : "are"} missing. Compression is disabled rather than ` +
+          `falling back to the smaller Workers AI models, which would silently change the ` +
+          `model behind your results. Clear AI_GATEWAY_ID to use the binding on purpose.`,
       };
     }
+
     return {
       kind: "gateway",
-      model,
+      model: model as string,
       url: `${GATEWAY_BASE}/${accountId}/${gatewayId}/compat/chat/completions`,
-      providerKey,
-      gatewayToken: env.AI_GATEWAY_TOKEN?.trim() || undefined,
+      ...(providerKey ? { providerKey } : {}),
+      ...(gatewayToken ? { gatewayToken } : {}),
     };
   }
 
@@ -69,15 +97,7 @@ export function resolveBackend(env: Env): AiBackend {
     return {
       kind: "binding",
       model: env.WORKERS_AI_MODEL?.trim() || DEFAULT_WORKERS_AI_MODEL,
-      gatewayId: gatewayId && accountId ? gatewayId : undefined,
     };
-  }
-
-  if (gatewayId) {
-    // Gateway was half-configured — say which piece is missing rather than
-    // silently degrading to "compression unavailable".
-    const missing = !accountId ? "AI_GATEWAY_ACCOUNT_ID / CF_ACCOUNT_ID" : "AI_PROVIDER_KEY";
-    return { kind: "none", reason: `AI_GATEWAY_ID is set but ${missing} is missing` };
   }
 
   return { kind: "none", reason: "No AI Gateway configured and no AI binding available" };
@@ -117,10 +137,15 @@ async function callGateway(
   maxTokens: number,
   temperature: number,
 ): Promise<ChatResult> {
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${backend.providerKey}`,
-    "Content-Type": "application/json",
-  };
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+
+  // Only send a provider Authorization header when there is a provider key to
+  // send. With BYOK or Unified Billing the gateway supplies the upstream
+  // credential itself, and an empty or placeholder Bearer would at best be
+  // ignored and at worst be forwarded to the provider as a bad key.
+  if (backend.providerKey) {
+    headers.Authorization = `Bearer ${backend.providerKey}`;
+  }
   if (backend.gatewayToken) {
     headers["cf-aig-authorization"] = `Bearer ${backend.gatewayToken}`;
   }
@@ -173,12 +198,13 @@ async function callBinding(
     return { ok: false, error: "AI binding is not available" };
   }
 
-  const options = backend.gatewayId ? { gateway: { id: backend.gatewayId } } : undefined;
-  const raw = await env.AI.run(
-    backend.model,
-    { messages, max_tokens: maxTokens, temperature },
-    options,
-  );
+  // Reached only when no gateway is configured, so there is no gateway option
+  // to pass through here.
+  const raw = await env.AI.run(backend.model, {
+    messages,
+    max_tokens: maxTokens,
+    temperature,
+  });
 
   // Workers AI text models return { response: string }; some return a bare string.
   const text =
