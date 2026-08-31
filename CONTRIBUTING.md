@@ -27,8 +27,8 @@ Local secrets go in `.dev.vars` (gitignored), one `KEY=value` per line:
 
 ```
 API_KEYS=local-dev-key
-CF_ACCOUNT_ID=...
 CF_API_TOKEN=...
+# CF_ACCOUNT_ID is optional. The Worker looks it up from the token.
 ```
 
 `wrangler.jsonc` **is** committed, and must stay free of resource IDs, account

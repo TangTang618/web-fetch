@@ -27,9 +27,8 @@
   "vars": {
     // --- Compression ------------------------------------------------------
     // Leave AI_GATEWAY_ID empty to use the Workers AI binding above. Set it
-    // (plus the AI_PROVIDER_KEY secret and AI_MODEL) to route compression
-    // through AI Gateway to any provider — recommended, since the models on
-    // the binding are small.
+    // (plus AI_MODEL) to route compression through AI Gateway. The same
+    // CF_API_TOKEN secret authenticates the gateway — no provider API key.
     "AI_GATEWAY_ID": "",
     // The model to compress with. Its form depends on AI_API_STYLE below.
     // For the default "chat" style: `{provider}/{model}`, e.g.

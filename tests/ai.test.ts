@@ -7,6 +7,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { chat, resolveBackend } from "../src/lib/ai.js";
 import { extractText } from "../src/lib/ai-styles.js";
+import { resetAccountIdCache } from "../src/lib/account.js";
 import { baseEnv, makeAiBinding } from "./helpers.js";
 
 function bodyOf(mock: ReturnType<typeof vi.fn>): Record<string, any> {
@@ -51,6 +52,7 @@ const GATEWAY = {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  resetAccountIdCache();
 });
 
 describe("chat — AI Gateway", () => {
@@ -67,6 +69,50 @@ describe("chat — AI Gateway", () => {
     // Must be absent, not empty: a placeholder Bearer would be forwarded
     // upstream as a bad provider key.
     expect(headers.Authorization).toBeUndefined();
+  });
+
+  it("uses CF_API_TOKEN as the gateway token so a second AI key is not needed", async () => {
+    const mock = stubCompletion();
+    const result = await chat(
+      baseEnv({ ...GATEWAY, CF_API_TOKEN: "one-cf-token" }),
+      [{ role: "user", content: "hi" }],
+    );
+
+    expect(result.ok).toBe(true);
+    const headers = headersOf(mock);
+    expect(headers["cf-aig-authorization"]).toBe("Bearer one-cf-token");
+    expect(headers.Authorization).toBeUndefined();
+  });
+
+  it("looks up the account ID from CF_API_TOKEN when none is configured", async () => {
+    const mock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/accounts?") || url.endsWith("/accounts") || url.includes("/accounts?per_page")) {
+        return new Response(JSON.stringify({ result: [{ id: "auto-acct", name: "Mine" }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "compressed output" } }] }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", mock);
+
+    const result = await chat(
+      baseEnv({
+        AI_GATEWAY_ID: "my-gateway",
+        AI_MODEL: "openai/gpt-5-mini",
+        CF_API_TOKEN: "one-cf-token",
+      }),
+      [{ role: "user", content: "hi" }],
+    );
+
+    expect(result.ok).toBe(true);
+    const urls = mock.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes("/client/v4/accounts"))).toBe(true);
+    expect(urls.some((u) => u === "https://gateway.ai.cloudflare.com/v1/auto-acct/my-gateway/compat/chat/completions")).toBe(true);
   });
 
   it("sends a provider Authorization header when a provider key is configured", async () => {

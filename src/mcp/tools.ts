@@ -114,7 +114,7 @@ function baseArgs(args: Record<string, unknown>): Record<string, unknown> {
 }
 
 function api(env: Env): CfBrowserApi {
-  return new CfBrowserApi(env.CF_ACCOUNT_ID as string, env.CF_API_TOKEN as string);
+  return new CfBrowserApi(env.CF_API_TOKEN as string, env.CF_ACCOUNT_ID);
 }
 
 /** Run a CF REST call and turn a failure into an MCP error response. */
@@ -311,7 +311,7 @@ const pdfTool: ToolDefinition = {
 
     if (!hasRestCredentials(env)) {
       return errorResponse(
-        "PDF rendering needs either CF_ACCOUNT_ID + CF_API_TOKEN or the BROWSER binding.",
+        "PDF rendering needs either CF_API_TOKEN or the BROWSER binding.",
       );
     }
 
@@ -675,11 +675,11 @@ export function findTool(name: string): ToolDefinition | undefined {
 export function unavailableReason(tool: ToolDefinition): string {
   switch (tool.requires) {
     case "rest":
-      return `${tool.name} needs the Browser Rendering REST API. Set the CF_ACCOUNT_ID and CF_API_TOKEN secrets.`;
+      return `${tool.name} needs the Browser Rendering REST API. Set the CF_API_TOKEN secret. Account ID is detected automatically.`;
     case "browser":
       return `${tool.name} needs the BROWSER binding (Workers Paid). Add it to wrangler.jsonc and redeploy.`;
     case "rest-or-browser":
-      return `${tool.name} needs either CF_ACCOUNT_ID + CF_API_TOKEN or the BROWSER binding.`;
+      return `${tool.name} needs either CF_API_TOKEN or the BROWSER binding.`;
     default:
       return `${tool.name} is unavailable.`;
   }

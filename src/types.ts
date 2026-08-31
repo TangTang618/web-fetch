@@ -2,19 +2,26 @@ export type Env = {
   // --- Secrets -------------------------------------------------------------
   /** Comma-separated list of API keys accepted by this Worker. Required. */
   API_KEYS: string;
-  /** Cloudflare account ID. Unlocks the Browser Rendering REST endpoints. */
+  /**
+   * Optional override. When unset, the Worker looks the account ID up from
+   * CF_API_TOKEN via GET /accounts. Only needed if that token can see more
+   * than one account.
+   */
   CF_ACCOUNT_ID?: string;
-  /** Cloudflare API token with Browser Rendering access. */
+  /**
+   * One Cloudflare API token. Unlocks Browser Rendering REST *and* authenticates
+   * AI Gateway (Unified Billing / BYOK). Account ID is detected from it.
+   */
   CF_API_TOKEN?: string;
-  /** Upstream provider key used for AI Gateway compression (e.g. an OpenAI key). */
+  /** Optional. Only if you still pass a provider key through the gateway yourself. */
   AI_PROVIDER_KEY?: string;
-  /** Optional AI Gateway authenticated-gateway token (sent as cf-aig-authorization). */
+  /** Optional. Defaults to CF_API_TOKEN — you do not need a second Cloudflare token. */
   AI_GATEWAY_TOKEN?: string;
 
   // --- Vars ----------------------------------------------------------------
   /** AI Gateway ID. When set, compression routes through the Gateway. */
   AI_GATEWAY_ID?: string;
-  /** Account ID for the Gateway URL. Falls back to CF_ACCOUNT_ID. */
+  /** Optional. Falls back to CF_ACCOUNT_ID, then to auto-detect from the token. */
   AI_GATEWAY_ACCOUNT_ID?: string;
   /**
    * Model for compression. `{provider}/{model}` for the unified chat API;

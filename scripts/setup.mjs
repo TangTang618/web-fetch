@@ -2,56 +2,52 @@
 /**
  * One-command setup.
  *
- * Deploys the Worker, provisions its KV namespaces and R2 bucket, generates an
- * API key, stores it as a secret, and prints ready-to-paste client config.
- *
- * Written in Node rather than bash so it runs the same on Windows, macOS and
- * Linux â€” the whole point of this project is not caring what you run it on.
+ * Deploys the Worker, provisions KV and R2, generates an API key, and
+ * optionally stores one Cloudflare API token. Account ID is detected from
+ * that token — you never type it. There is no provider (OpenAI) key.
  *
  *   npm run setup
  */
 
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 
 const isWindows = process.platform === "win32";
 
 const style = {
-  bold: (s) => `[1m${s}[0m`,
-  dim: (s) => `[2m${s}[0m`,
-  green: (s) => `[32m${s}[0m`,
-  yellow: (s) => `[33m${s}[0m`,
-  red: (s) => `[31m${s}[0m`,
+  bold: (s) => `\x1b[1m${s}\x1b[0m`,
+  dim: (s) => `\x1b[2m${s}\x1b[0m`,
+  green: (s) => `\x1b[32m${s}\x1b[0m`,
+  yellow: (s) => `\x1b[33m${s}\x1b[0m`,
+  red: (s) => `\x1b[31m${s}\x1b[0m`,
 };
 
 function info(message) {
-  console.log(`${style.dim("â†’")} ${message}`);
+  console.log(`${style.dim("?")} ${message}`);
 }
 function ok(message) {
-  console.log(`${style.green("âœ“")} ${message}`);
+  console.log(`${style.green("?")} ${message}`);
 }
 function warn(message) {
   console.log(`${style.yellow("!")} ${message}`);
 }
 function fail(message) {
-  console.error(`${style.red("âœ—")} ${message}`);
+  console.error(`${style.red("?")} ${message}`);
   process.exit(1);
 }
 
-/** Run a command, streaming its output. Returns the exit status. */
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, {
+  return spawnSync(command, args, {
     stdio: options.input === undefined ? "inherit" : ["pipe", "inherit", "inherit"],
     shell: isWindows,
     encoding: "utf8",
     ...options,
   });
-  return result;
 }
 
-/** Run a command and capture stdout, without echoing it. */
 function capture(command, args) {
   const result = spawnSync(command, args, {
     stdio: ["ignore", "pipe", "pipe"],
@@ -65,7 +61,6 @@ function wrangler(args, options) {
   return run("npx", ["--yes", "wrangler@4", ...args], options);
 }
 
-/** Put a secret without ever writing it to disk or a shell history line. */
 function putSecret(name, value) {
   const result = wrangler(["secret", "put", name], { input: value });
   if (result.status !== 0) {
@@ -73,28 +68,99 @@ function putSecret(name, value) {
   }
 }
 
+/** Write a wrangler.jsonc string var in place. Gateway id / model are not secrets. */
+function setWranglerVar(name, value) {
+  const path = "wrangler.jsonc";
+  const text = readFileSync(path, "utf8");
+  const re = new RegExp(`("${name}":\\s*")[^"]*(")`);
+  if (!re.test(text)) {
+    fail(`wrangler.jsonc has no ${name} field to fill in.`);
+  }
+  const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  writeFileSync(path, text.replace(re, `$1${escaped}$2`));
+}
+
+function parseWhoamiAccounts(raw) {
+  if (!raw) return [];
+  try {
+    const data = JSON.parse(raw);
+    const list = data.accounts ?? [];
+    return list
+      .map((a) => ({
+        id: a.id ?? a.account_id,
+        name: a.name ?? a.account_name ?? a.id,
+      }))
+      .filter((a) => typeof a.id === "string" && a.id);
+  } catch {
+    return [];
+  }
+}
+
+async function accountsFromToken(token) {
+  try {
+    const res = await fetch("https://api.cloudflare.com/client/v4/accounts?per_page=50", {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) return [];
+    const body = await res.json();
+    const list = Array.isArray(body.result) ? body.result : [];
+    return list
+      .map((a) => ({ id: a.id, name: a.name || a.id }))
+      .filter((a) => typeof a.id === "string" && a.id);
+  } catch {
+    return [];
+  }
+}
+
+async function pickAccount(rl, accounts, label) {
+  if (accounts.length === 0) return null;
+  if (accounts.length === 1) {
+    const a = accounts[0];
+    ok(`Account: ${a.name} (${a.id})`);
+    return a.id;
+  }
+
+  console.log(style.dim(`\n  This ${label} can see ${accounts.length} accounts:`));
+  accounts.forEach((a, i) => {
+    console.log(`    ${i + 1}. ${a.name}  ${style.dim(a.id)}`);
+  });
+  const answer = (await rl.question("  Which one? [1] ")).trim() || "1";
+  const index = Number.parseInt(answer, 10) - 1;
+  const chosen = accounts[index];
+  if (!chosen) {
+    warn("Not a valid choice — skipping account ID (the Worker will detect it at runtime).");
+    return null;
+  }
+  ok(`Using ${chosen.name}`);
+  return chosen.id;
+}
+
+function findWorkerUrl(output) {
+  if (!output) return null;
+  const match = /https:\/\/[a-z0-9.-]+\.workers\.dev/i.exec(output);
+  return match ? match[0] : null;
+}
+
 async function main() {
   console.log(style.bold("\nweb-fetch setup\n"));
 
-  // --- Preflight -----------------------------------------------------------
   const nodeMajor = Number(process.versions.node.split(".")[0]);
   if (nodeMajor < 18) {
     fail(`Node 18+ is required (found ${process.versions.node}).`);
   }
 
-  info("Checking your Cloudflare loginâ€¦");
-  const whoami = capture("npx", ["--yes", "wrangler@4", "whoami"]);
-  if (!whoami || /not authenticated|you are not logged in/i.test(whoami)) {
+  info("Checking your Cloudflare login…");
+  const whoamiText = capture("npx", ["--yes", "wrangler@4", "whoami"]);
+  if (!whoamiText || /not authenticated|you are not logged in/i.test(whoamiText)) {
     fail("Not logged in to Cloudflare. Run `npx wrangler login` and try again.");
   }
   ok("Cloudflare CLI is authenticated.");
 
-  // --- Deploy --------------------------------------------------------------
-  // Resource IDs are absent from wrangler.jsonc on purpose: this deploy is what
-  // creates the KV namespaces and the R2 bucket and binds them.
-  info("Deploying the Worker (this also provisions KV and R2). Takes about 30sâ€¦");
-  // Captured rather than inherited so the deployed URL can be read back out of
-  // the output; it is echoed below either way.
+  const whoamiJson = capture("npx", ["--yes", "wrangler@4", "whoami", "--json"]);
+  const whoamiAccounts = parseWhoamiAccounts(whoamiJson);
+
+  info("Deploying the Worker (this also creates KV and R2). Takes about 30s…");
   const deploy = spawnSync("npx", ["--yes", "wrangler@4", "deploy"], {
     stdio: ["ignore", "pipe", "pipe"],
     shell: isWindows,
@@ -107,78 +173,85 @@ async function main() {
   }
   ok("Worker deployed.");
 
-  // --- API key -------------------------------------------------------------
   const apiKey = randomBytes(32).toString("hex");
-  info("Generating an API key and storing it as a secretâ€¦");
+  info("Generating an API key and storing it as a secret…");
   putSecret("API_KEYS", apiKey);
   ok("API key stored.");
 
-  // --- Optional secrets ----------------------------------------------------
   const rl = createInterface({ input: stdin, output: stdout });
 
   console.log(
     style.dim(
-      "\nThe Worker already works: plain-HTTP fetching needs nothing else.\n" +
-        "The following unlock the rest, and can be added later.\n",
+      "\nThe Worker already works for plain page reads.\n" +
+        "One Cloudflare API token unlocks screenshots, crawl, and AI compression.\n" +
+        "Account ID is detected automatically — you will not be asked for it.\n",
     ),
   );
 
-  const wantsRest = await rl.question(
-    "Add a Cloudflare API token for browser rendering (crawl, AI extract, screenshots)? [y/N] ",
+  const wantsToken = await rl.question(
+    "Paste a Cloudflare API token now? (Enter to skip) ",
   );
-  if (/^y/i.test(wantsRest.trim())) {
-    console.log(
-      style.dim(
-        "  Create one at https://dash.cloudflare.com/profile/api-tokens\n" +
-          "  using the 'Edit Cloudflare Workers' template.\n",
-      ),
-    );
-    const accountId = (await rl.question("  Cloudflare account ID: ")).trim();
-    const apiToken = (await rl.question("  Cloudflare API token: ")).trim();
-    if (accountId && apiToken) {
-      putSecret("CF_ACCOUNT_ID", accountId);
-      putSecret("CF_API_TOKEN", apiToken);
-      ok("Browser Rendering credentials stored.");
-    } else {
-      warn("Skipped â€” both values are required.");
+  const apiToken = wantsToken.trim();
+  if (apiToken) {
+    putSecret("CF_API_TOKEN", apiToken);
+    ok("Cloudflare API token stored.");
+
+    info("Detecting account ID from the token…");
+    let accounts = await accountsFromToken(apiToken);
+    if (accounts.length === 0 && whoamiAccounts.length > 0) {
+      warn("Token could not list accounts; falling back to your wrangler login.");
+      accounts = whoamiAccounts;
     }
+    const accountId = await pickAccount(rl, accounts, "token");
+    if (accountId) {
+      putSecret("CF_ACCOUNT_ID", accountId);
+      ok("Account ID stored (detected, not typed).");
+    } else {
+      warn("Account ID not stored. The Worker will look it up from the token on first use.");
+    }
+  } else {
+    warn("Skipped. You can add it later: npx wrangler secret put CF_API_TOKEN");
   }
 
   const wantsAi = await rl.question(
-    "\nRoute content compression through AI Gateway (recommended)? [y/N] ",
+    "\nUse AI Gateway for better compression (GPT / Claude / Gemini)? [y/N] ",
   );
   if (/^y/i.test(wantsAi.trim())) {
     console.log(
       style.dim(
-        "  Create a gateway at https://dash.cloudflare.com â†’ AI â†’ AI Gateway.\n" +
-          "  The model is `{provider}/{model}`, e.g. openai/gpt-5-mini\n" +
-          "  or google-ai-studio/gemini-2.5-flash.\n",
+        "  Create a gateway at https://dash.cloudflare.com ? AI ? AI Gateway.\n" +
+          "  Turn on Unified Billing or store provider keys on the gateway (BYOK).\n" +
+          "  Same Cloudflare token as above — no OpenAI/Anthropic key to paste here.\n",
       ),
     );
-    const gatewayId = (await rl.question("  AI Gateway ID: ")).trim();
-    const model = (await rl.question("  Model (provider/model): ")).trim();
-    const providerKey = (await rl.question("  Provider API key: ")).trim();
+    const gatewayId = (await rl.question("  AI Gateway name/id: ")).trim();
+    const model =
+      (await rl.question("  Model [openai/gpt-5-mini]: ")).trim() || "openai/gpt-5-mini";
 
-    if (gatewayId && model && providerKey) {
-      putSecret("AI_PROVIDER_KEY", providerKey);
-      ok("Provider key stored.");
-      warn(
-        "Now set these two vars in wrangler.jsonc and redeploy:\n" +
-          `      "AI_GATEWAY_ID": "${gatewayId}",\n` +
-          `      "AI_MODEL": "${model}"`,
-      );
+    if (gatewayId) {
+      setWranglerVar("AI_GATEWAY_ID", gatewayId);
+      setWranglerVar("AI_MODEL", model);
+      ok(`Wrote AI_GATEWAY_ID and AI_MODEL to wrangler.jsonc.`);
+      info("Redeploying so the gateway settings take effect…");
+      const redeploy = wrangler(["deploy"]);
+      if (redeploy.status !== 0) {
+        fail("Redeploy failed. Fix the error above and run `npx wrangler deploy`.");
+      }
+      ok("Redeployed.");
+      if (!apiToken) {
+        warn("Compression still needs CF_API_TOKEN. Run setup again or: npx wrangler secret put CF_API_TOKEN");
+      }
     } else {
-      warn("Skipped â€” all three values are required.");
+      warn("Skipped — no gateway id.");
     }
   }
 
   rl.close();
 
-  // --- Report --------------------------------------------------------------
   const deployedUrl = findWorkerUrl(deployOutput) ?? "https://<your-worker>.workers.dev";
 
   console.log(style.bold("\n\nDone.\n"));
-  console.log("Add this to your MCP client config:\n");
+  console.log("Paste this into your MCP client config:\n");
   console.log(
     JSON.stringify(
       {
@@ -196,16 +269,9 @@ async function main() {
   );
   console.log(`\nCheck what this deployment can do:\n  curl ${deployedUrl}/health\n`);
   console.log(
-    style.yellow("Save the API key now â€” it is stored as a secret and cannot be read back:"),
+    style.yellow("Save the API key now — it is stored as a secret and cannot be read back:"),
   );
   console.log(`  ${apiKey}\n`);
-}
-
-/** Pull the deployed URL out of wrangler's output, if it echoed one. */
-function findWorkerUrl(output) {
-  if (!output) return null;
-  const match = /https:\/\/[a-z0-9.-]+\.workers\.dev/i.exec(output);
-  return match ? match[0] : null;
 }
 
 main().catch((err) => {

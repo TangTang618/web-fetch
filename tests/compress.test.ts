@@ -72,7 +72,7 @@ describe("resolveBackend", () => {
       baseEnv({ AI_GATEWAY_ID: "my-gw", AI_GATEWAY_ACCOUNT_ID: "acct", AI_MODEL: "openai/x" }),
     );
     expect(backend.kind).toBe("none");
-    if (backend.kind === "none") expect(backend.reason).toContain("AI_PROVIDER_KEY");
+    if (backend.kind === "none") expect(backend.reason).toContain("CF_API_TOKEN");
   });
 
   it("accepts a gateway token alone, for gateways holding the provider key (BYOK)", () => {
@@ -107,7 +107,7 @@ describe("resolveBackend", () => {
     );
     expect(backend.kind).toBe("none");
     if (backend.kind === "none") {
-      expect(backend.reason).toContain("AI_PROVIDER_KEY or AI_GATEWAY_TOKEN");
+      expect(backend.reason).toContain("CF_API_TOKEN");
       expect(backend.reason).toContain("Clear AI_GATEWAY_ID");
     }
   });
@@ -116,8 +116,7 @@ describe("resolveBackend", () => {
     const backend = resolveBackend(baseEnv({ AI_GATEWAY_ID: "my-gw", AI: makeAiBinding("x") }));
     expect(backend.kind).toBe("none");
     if (backend.kind === "none") {
-      expect(backend.reason).toContain("AI_GATEWAY_ACCOUNT_ID");
-      expect(backend.reason).toContain("AI_PROVIDER_KEY");
+      expect(backend.reason).toContain("CF_API_TOKEN");
       expect(backend.reason).toContain("AI_MODEL");
     }
   });
@@ -133,6 +132,23 @@ describe("resolveBackend", () => {
     );
     expect(backend.kind).toBe("gateway");
     if (backend.kind === "gateway") expect(backend.accountId).toBe("from-cf");
+  });
+
+  it("treats CF_API_TOKEN as enough — no provider key, no hand-typed account ID", () => {
+    const backend = resolveBackend(
+      baseEnv({
+        AI_GATEWAY_ID: "my-gw",
+        AI_MODEL: "openai/gpt-5-mini",
+        CF_API_TOKEN: "cf-token",
+      }),
+    );
+    expect(backend.kind).toBe("gateway");
+    if (backend.kind === "gateway") {
+      expect(backend.gatewayToken).toBe("cf-token");
+      expect(backend.providerKey).toBeUndefined();
+      expect(backend.accountId).toBe("");
+      expect(backend.lookupToken).toBe("cf-token");
+    }
   });
 });
 

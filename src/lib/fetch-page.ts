@@ -9,7 +9,7 @@
  *
  * Browser rendering itself has two backends, tried in order:
  *   1. the Browser Rendering REST API (`/markdown`, `/content`) — best quality,
- *      needs CF_ACCOUNT_ID + CF_API_TOKEN;
+ *      needs CF_API_TOKEN (account ID is detected from the token);
  *   2. the `BROWSER` binding via puppeteer, converted locally — needs no token.
  */
 
@@ -228,7 +228,7 @@ function stripMarkdown(markdown: string): string {
 // ---------------------------------------------------------------------------
 
 export function hasRestCredentials(env: Env): boolean {
-  return Boolean(env.CF_ACCOUNT_ID && env.CF_API_TOKEN);
+  return Boolean(env.CF_API_TOKEN?.trim());
 }
 
 async function renderInBrowser(
@@ -239,7 +239,7 @@ async function renderInBrowser(
   const wantsHtml = body.format === "html";
 
   if (hasRestCredentials(env)) {
-    const api = new CfBrowserApi(env.CF_ACCOUNT_ID as string, env.CF_API_TOKEN as string);
+    const api = new CfBrowserApi(env.CF_API_TOKEN as string, env.CF_ACCOUNT_ID);
     const { mode: _m, compress: _c, query: _q, format: _f, max_chars: _mc, no_cache: _nc, ...rest } =
       body;
     const payload = mapToCfParams(rest as Record<string, unknown>);
@@ -269,7 +269,7 @@ async function renderInBrowser(
 
   if (!env.BROWSER) {
     throw new FetchPageError(
-      "Browser rendering is unavailable: set CF_ACCOUNT_ID + CF_API_TOKEN, or add the BROWSER binding.",
+      "Browser rendering is unavailable: set CF_API_TOKEN, or add the BROWSER binding.",
       501,
     );
   }

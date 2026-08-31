@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0]
+
+Setup is one Cloudflare token. You do not type an account ID, and you do not
+paste an OpenAI (or any other provider) key.
+
+### Changed
+
+- **`CF_ACCOUNT_ID` is detected automatically** from `CF_API_TOKEN` via
+  `GET /accounts`. Setup never asks you to paste it. You only set it if the
+  token can see more than one account.
+- **One `CF_API_TOKEN` is enough.** It unlocks Browser Rendering *and*
+  authenticates AI Gateway (Unified Billing / BYOK). `AI_PROVIDER_KEY` is no
+  longer part of the default path.
+- **README rewritten** as a short deploy guide, English and Chinese.
+
 ## [3.0.0]
 
 Reoriented the project around a single deployable artifact: the Worker. It now

@@ -22,6 +22,7 @@
  */
 
 import type { Env } from "../types.js";
+import { lookupAccountId } from "./account.js";
 import {
   buildRequest,
   extractError,
@@ -50,10 +51,13 @@ export type AiBackend =
       kind: "gateway";
       model: string;
       style: ApiStyle;
+      /** Empty when it will be looked up from `lookupToken` at call time. */
       accountId: string;
       gatewayId: string;
       providerKey?: string;
       gatewayToken?: string;
+      /** CF_API_TOKEN / AI_GATEWAY_TOKEN, used to auto-detect the account ID. */
+      lookupToken?: string;
     }
   | { kind: "binding"; model: string }
   | { kind: "none"; reason: string };
@@ -69,6 +73,9 @@ export function resolveBackend(env: Env): AiBackend {
   const accountId = (env.AI_GATEWAY_ACCOUNT_ID ?? env.CF_ACCOUNT_ID)?.trim();
   const providerKey = env.AI_PROVIDER_KEY?.trim();
   const model = env.AI_MODEL?.trim();
+  // One Cloudflare token covers gateway auth *and* account-ID lookup.
+  // A dedicated AI_GATEWAY_TOKEN still wins if someone set both.
+  const cfToken = env.AI_GATEWAY_TOKEN?.trim() || env.CF_API_TOKEN?.trim();
 
   // Setting AI_GATEWAY_ID is an explicit choice of backend, so an incomplete
   // gateway config is an error to report — never a quiet downgrade to the
@@ -77,8 +84,6 @@ export function resolveBackend(env: Env): AiBackend {
   // compressed response, and the AI binding is present in the default
   // wrangler.jsonc, so the downgrade would almost always be available.
   if (gatewayId) {
-    const gatewayToken = env.AI_GATEWAY_TOKEN?.trim();
-
     const rawStyle = env.AI_API_STYLE?.trim().toLowerCase() || "chat";
     if (!isApiStyle(rawStyle)) {
       return {
@@ -88,7 +93,6 @@ export function resolveBackend(env: Env): AiBackend {
     }
 
     const missing: string[] = [];
-    if (!accountId) missing.push("AI_GATEWAY_ACCOUNT_ID (or CF_ACCOUNT_ID)");
     if (!model) {
       // The unified endpoint routes on a `{provider}/{model}` name; the
       // provider-specific paths take the provider's own bare model id.
@@ -98,12 +102,17 @@ export function resolveBackend(env: Env): AiBackend {
           : "AI_MODEL (the provider's own model id)",
       );
     }
-    // Either credential is sufficient on its own. A gateway holding the
-    // provider's key itself — via BYOK or Unified Billing — is authenticated
-    // with AI_GATEWAY_TOKEN alone, and requiring a provider key there would
-    // lock out the setup Cloudflare recommends.
-    if (!providerKey && !gatewayToken) {
-      missing.push("AI_PROVIDER_KEY or AI_GATEWAY_TOKEN");
+    // One CF token is enough: it authenticates the gateway (Unified Billing /
+    // BYOK) and is used to look up the account ID. A leftover OpenAI-style
+    // provider key still works if someone has one, but it is not required.
+    if (!providerKey && !cfToken) {
+      missing.push("CF_API_TOKEN");
+    }
+    // A leftover provider key can still authenticate the model, but the
+    // gateway URL needs an account ID. Without a CF token we cannot look
+    // that up, so an explicit account id (or a CF token) is required.
+    if (!accountId && !cfToken) {
+      if (!missing.includes("CF_API_TOKEN")) missing.push("CF_API_TOKEN");
     }
 
     if (missing.length > 0) {
@@ -121,10 +130,10 @@ export function resolveBackend(env: Env): AiBackend {
       kind: "gateway",
       model: model as string,
       style: rawStyle,
-      accountId: accountId as string,
+      accountId: accountId ?? "",
       gatewayId,
       ...(providerKey ? { providerKey } : {}),
-      ...(gatewayToken ? { gatewayToken } : {}),
+      ...(cfToken ? { gatewayToken: cfToken, lookupToken: cfToken } : {}),
     };
   }
 
@@ -158,7 +167,7 @@ export async function chat(
 
   try {
     if (backend.kind === "gateway") {
-      return await callGateway(backend, messages, maxTokens, temperature);
+      return await callGateway(env, backend, messages, maxTokens, temperature);
     }
     return await callBinding(env, backend, messages, maxTokens, temperature);
   } catch (err) {
@@ -167,16 +176,28 @@ export async function chat(
 }
 
 async function callGateway(
+  env: Env,
   backend: Extract<AiBackend, { kind: "gateway" }>,
   messages: ChatMessage[],
   maxTokens: number,
   temperature: number,
 ): Promise<ChatResult> {
+  let accountId = backend.accountId.trim();
+  if (!accountId) {
+    const token = backend.lookupToken || env.CF_API_TOKEN?.trim() || env.AI_GATEWAY_TOKEN?.trim();
+    if (!token) {
+      return { ok: false, error: "No Cloudflare token available to look up the account ID." };
+    }
+    const lookup = await lookupAccountId(token);
+    if (!lookup.ok) return { ok: false, error: lookup.error };
+    accountId = lookup.id;
+  }
+
   // The style owns the URL, the auth header, the body shape and where the
   // answer lives; everything below is shape-agnostic.
   const request = buildRequest(backend.style, {
     gatewayBase: GATEWAY_BASE,
-    accountId: backend.accountId,
+    accountId,
     gatewayId: backend.gatewayId,
     model: backend.model,
     system: messages.find((m) => m.role === "system")?.content ?? "",

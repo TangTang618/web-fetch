@@ -5,27 +5,33 @@
  * async crawl, and server-side rendering without Worker CPU cost.
  *
  * Docs: https://developers.cloudflare.com/browser-rendering/rest-api/
+ *
+ * Account ID is optional: if it is not set, the first request looks it up
+ * from CF_API_TOKEN via GET /accounts (see `account.ts`).
  */
 
+import { lookupAccountId, type AccountLookup } from "./account.js";
 import { validateUrlWithDns } from "./validate-url.js";
 import type { Env } from "../types.js";
 
 /** Shown when a route needs the REST API but the deployment has no token. */
 export const REST_UNAVAILABLE_MESSAGE =
-  "This endpoint needs the Browser Rendering REST API. Set the CF_ACCOUNT_ID and " +
-  "CF_API_TOKEN secrets (`npx wrangler secret put CF_API_TOKEN`) and redeploy. " +
-  "POST /fetch and the web_fetch MCP tool work without them.";
+  "This endpoint needs a Cloudflare API token. Set the CF_API_TOKEN secret " +
+  "(`npx wrangler secret put CF_API_TOKEN`) and redeploy. Account ID is " +
+  "detected from the token automatically. POST /fetch and the web_fetch MCP " +
+  "tool work without it.";
 
 /**
- * Build a REST client, or `null` when this deployment has no credentials.
+ * Build a REST client, or `null` when this deployment has no token.
  *
  * The Worker is deliberately usable with nothing but an API key — plain
  * fetching needs no Cloudflare token — so every REST-backed route has to cope
  * with the credentials being absent rather than assuming them.
  */
 export function cfApiFromEnv(env: Env): CfBrowserApi | null {
-  if (!env.CF_ACCOUNT_ID || !env.CF_API_TOKEN) return null;
-  return new CfBrowserApi(env.CF_ACCOUNT_ID, env.CF_API_TOKEN);
+  const token = env.CF_API_TOKEN?.trim();
+  if (!token) return null;
+  return new CfBrowserApi(token, env.CF_ACCOUNT_ID);
 }
 
 export type CfApiResponse<T> =
@@ -33,12 +39,25 @@ export type CfApiResponse<T> =
   | { ok: false; status: number; message: string };
 
 export class CfBrowserApi {
-  private readonly baseUrl: string;
+  private accountId: string | undefined;
+  private accountLookup: Promise<AccountLookup> | null = null;
   private readonly apiToken: string;
 
-  constructor(accountId: string, apiToken: string) {
-    this.baseUrl = `https://api.cloudflare.com/client/v4/accounts/${accountId}/browser-rendering`;
+  constructor(apiToken: string, accountId?: string) {
     this.apiToken = apiToken;
+    const trimmed = accountId?.trim();
+    this.accountId = trimmed || undefined;
+  }
+
+  private async resolveAccountId(): Promise<AccountLookup> {
+    if (this.accountId) return { ok: true, id: this.accountId };
+    if (!this.accountLookup) {
+      this.accountLookup = lookupAccountId(this.apiToken).then((result) => {
+        if (result.ok) this.accountId = result.id;
+        return result;
+      });
+    }
+    return this.accountLookup;
   }
 
   private headers(): HeadersInit {
@@ -61,12 +80,20 @@ export class CfBrowserApi {
         }
       }
 
-      const res = await fetch(`${this.baseUrl}${endpoint}`, {
-        method,
-        headers: this.headers(),
-        body: body ? JSON.stringify(body) : undefined,
-        signal: AbortSignal.timeout(55_000),
-      });
+      const account = await this.resolveAccountId();
+      if (!account.ok) {
+        return { ok: false, status: 501, message: account.error };
+      }
+
+      const res = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${account.id}/browser-rendering${endpoint}`,
+        {
+          method,
+          headers: this.headers(),
+          body: body ? JSON.stringify(body) : undefined,
+          signal: AbortSignal.timeout(55_000),
+        },
+      );
 
       if (!res.ok) {
         const rawText = await res.text().catch(() => res.statusText);
@@ -153,5 +180,4 @@ export class CfBrowserApi {
   async getCrawlStatus(jobId: string): Promise<CfApiResponse<unknown>> {
     return this.request<unknown>("GET", `/crawl/${jobId}`);
   }
-
 }

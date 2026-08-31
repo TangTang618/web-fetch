@@ -21,7 +21,7 @@ import {
 import type { Env } from "../types.js";
 
 export const SERVER_NAME = "web-fetch";
-export const SERVER_VERSION = "3.0.0";
+export const SERVER_VERSION = "3.1.0";
 
 /** Protocol revisions this server speaks, newest first. */
 const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
