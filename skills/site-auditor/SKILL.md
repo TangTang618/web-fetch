@@ -1,6 +1,6 @@
 ---
 name: site-auditor
-description: Audit website SEO, links, and accessibility using CF Browser Rendering
+description: Audit website SEO, links, and accessibility using web-fetch
 user_invocable: true
 ---
 
@@ -10,15 +10,15 @@ Comprehensive website audit for SEO, broken links, and accessibility.
 
 ## Prerequisites
 
-CF Browser MCP server must be configured in `.mcp.json` (see [quick start](../../README.md#quick-start)).
+The web-fetch MCP server must be configured in your client (see [Deploy](../../README.md#deploy)).
 
 ## Workflow
 
 ### Step 1: Crawl Site
 
 ```
-browser_crawl(url, limit=50)
-→ browser_crawl_status(job_id, wait=True)
+web_crawl(url, limit=50)
+→ web_crawl_status(job_id, wait=True)
 → Get list of all discovered pages
 ```
 
@@ -33,7 +33,7 @@ Parse these first — this covers 80% of SEO checks with zero extra API calls:
 
 ### Step 3: Deep Scrape (only pages with issues)
 
-For pages where crawl metadata is insufficient, use `browser_scrape` to extract:
+For pages where crawl metadata is insufficient, use `web_scrape` to extract:
 - `h1`, `h2`, `h3` headings (hierarchy check)
 - `img` tags (check alt attributes)
 - `link[rel="canonical"]` canonical URL
@@ -44,7 +44,7 @@ Batch scrape in groups of 5 to respect rate limits.
 
 ### Step 4: Check Links
 
-Using `browser_links` on 3-5 key pages (homepage, major sections):
+Using `web_links` on 3-5 key pages (homepage, major sections):
 - Categorize: internal, external, resource
 - Cross-reference with crawl results to find orphan pages
 - Identify links pointing to 4xx/5xx pages found in Step 2

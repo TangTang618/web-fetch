@@ -10,11 +10,11 @@ Track releases, changelogs, and breaking changes from any software project's web
 
 ## Prerequisites
 
-CF Browser MCP server must be configured in `.mcp.json` (see [quick start](../../README.md#quick-start)).
+The web-fetch MCP server must be configured in your client (see [Deploy](../../README.md#deploy)).
 
 ## Why This Skill?
 
-GitHub releases, framework changelogs, and library docs are often JS-rendered pages that `WebFetch` can't read. This skill uses `browser_json` to extract structured release data from any page.
+GitHub releases, framework changelogs, and library docs are often JS-rendered pages that `WebFetch` can't read. This skill uses `web_extract` to extract structured release data from any page.
 
 ## Workflow
 
@@ -29,12 +29,12 @@ From the user's input, resolve the changelog URL:
 ### Step 2: Extract Releases
 
 ```
-browser_json(url, prompt="Extract the latest N releases with version, date, and key changes as JSON array")
+web_extract(url, prompt="Extract the latest N releases with version, date, and key changes as JSON array")
 ```
 
 For changelog pages (non-GitHub):
 ```
-browser_json(url, prompt="Extract version entries with version number, release date, and list of changes")
+web_extract(url, prompt="Extract version entries with version number, release date, and list of changes")
 ```
 
 ### Step 3: Analyze
@@ -77,13 +77,13 @@ Output a structured summary:
 
 ```
 "What's new in Claude Code?"
-→ browser_json("https://github.com/anthropics/claude-code/releases") → structured summary
+→ web_extract("https://github.com/anthropics/claude-code/releases") → structured summary
 
 "Check for breaking changes in Next.js 15"
-→ browser_json("https://nextjs.org/blog") → filter breaking changes
+→ web_extract("https://nextjs.org/blog") → filter breaking changes
 
 "Latest Hono releases"
-→ browser_json("https://github.com/honojs/hono/releases") → version + changes
+→ web_extract("https://github.com/honojs/hono/releases") → version + changes
 
 "Has Astro released anything since 5.18?"
 → Extract releases → filter versions > 5.18

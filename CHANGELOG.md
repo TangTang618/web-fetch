@@ -5,6 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0]
+
+Reoriented the project around a single deployable artifact: the Worker. It now
+serves MCP directly, so any client on any platform connects with a URL and a key
+instead of installing a local runtime.
+
+### Added
+
+- **MCP over Streamable HTTP** (`POST /mcp`) — stateless JSON-RPC, no Durable
+  Object required. Bearer / `X-API-Key` / `?key=` auth, SSE framing for clients
+  that only accept `text/event-stream`, and legacy batch support.
+- **`web_fetch`** — one tool covering the common case, with a plain-HTTP fast
+  path that escalates to browser rendering only when a page comes back empty,
+  blocked, or client-rendered.
+- **Model-backed compression** — `query` returns only the passages relevant to a
+  question; long pages without a query are condensed. Runs through AI Gateway's
+  OpenAI-compatible endpoint (any provider) with the Workers AI binding as a
+  fallback. Never fails a request: on model error the full content is returned
+  with a warning.
+- **Capability gating** — `tools/list` hides tools this deployment cannot run,
+  rather than advertising tools that always error. `MCP_TOOLSET=minimal` trims
+  the list further.
+- **`POST /fetch` and `/openapi.json`** for agents that do not speak MCP.
+- **`/health`** now reports which capabilities are configured and what is missing.
+- **`npm run setup`** — cross-platform Node setup script, replacing the bash one.
+- CI runs on Linux, macOS and Windows.
+
+### Changed
+
+- **Repository is Worker-only.** The Python SDK (`cf-browser`) and stdio MCP
+  server (`cf-browser-mcp`) were removed; the Worker is the distribution point.
+- `wrangler.jsonc` is committed without resource IDs, so a fresh clone or a
+  GitHub-connected build provisions KV and R2 automatically.
+- Cloudflare API credentials are optional. With only `API_KEYS` set, fetching
+  and the whole MCP surface still work.
+
+### Fixed
+
+- **`web_a11y` returns a real accessibility tree**, from the dedicated
+  `/accessibilityTree` endpoint, instead of a `/snapshot` response with the
+  screenshot stripped out.
+- **PDF `format` and `landscape` are honoured** via the browser binding instead
+  of being silently discarded.
+- **DNS resolution is cached process-wide.** The previous per-call `new Map()`
+  default meant every validated request paid two fresh DoH round-trips. Failed
+  lookups are no longer cached.
+- **Code-block indentation survives conversion** — the final whitespace-collapse
+  pass no longer eats leading spaces inside fenced blocks.
+- **Oversized single-line content is chunked.** Text with no line breaks was
+  previously handed to the model whole.
+- **A URL rejected on security grounds is not retried through the browser**, so
+  the SSRF reason is what surfaces rather than "browser unavailable".
+
 ## [Unreleased]
 
 ### Security
