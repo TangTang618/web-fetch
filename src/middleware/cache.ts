@@ -29,6 +29,7 @@ export async function getCached(
   }
 
   // R2
+  if (!c.env.STORAGE) return { hit: false };
   const obj = await c.env.STORAGE.get(cacheKey);
   if (obj === null) return { hit: false };
   const buffer = await obj.arrayBuffer();
@@ -65,6 +66,9 @@ export async function setCached(
   }
 
   // R2
+  // R2 is an optional optimization. A fresh Git deployment may not have a
+  // bucket yet, so serve the response without caching instead of failing it.
+  if (!c.env.STORAGE) return;
   await c.env.STORAGE.put(cacheKey, data as ArrayBuffer, {
     httpMetadata: { contentType },
     customMetadata: { cached_at: String(Date.now()), ttl: String(ttlSeconds) },
