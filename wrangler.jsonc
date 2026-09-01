@@ -13,13 +13,9 @@
     { "binding": "RATE_LIMIT" }
   ],
 
-  "r2_buckets": [
-    { "binding": "STORAGE", "bucket_name": "web-fetch-storage" }
-  ],
 
   // Headless Chrome. Needed for browser interaction and paper-size PDFs;
   // plain fetching and the REST endpoints work without it.
-  "browser": { "binding": "BROWSER" },
 
   // Workers AI — the compression fallback when no AI Gateway is configured.
   "ai": { "binding": "AI" },
@@ -53,7 +49,6 @@
     "COMPRESS_QUERY_MIN": "800",
 
     // "full" (all tools) or "minimal" (core reading tools only).
-    "MCP_TOOLSET": "full"
   },
 
   "observability": { "enabled": true }
