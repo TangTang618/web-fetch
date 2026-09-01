@@ -9,8 +9,8 @@ import { mapToCfParams } from "../lib/param-map.js";
  *   POST /crawl          — start a new crawl job, returns job ID
  *   GET  /crawl/:id      — poll status / retrieve completed results
  *
- * Completed results are stored in R2 under key `crawl:{jobId}` so subsequent
- * polls for a finished job don't hit the CF API again.
+ * Completed results are stored in R2 when that optional binding is configured.
+ * Without R2, status polling still works and simply skips the cache.
  */
 const app = new Hono<AppEnv>();
 
@@ -75,7 +75,7 @@ app.get("/:id", async (c) => {
   const r2Key = `${R2_KEY_PREFIX}${jobId}`;
 
   // Check R2 for a completed result first
-  const stored = await c.env.STORAGE.get(r2Key);
+  const stored = c.env.STORAGE ? await c.env.STORAGE.get(r2Key) : null;
   if (stored !== null) {
     const data = await stored.json();
     c.header("X-Cache", "HIT");
@@ -107,7 +107,7 @@ app.get("/:id", async (c) => {
     statusData.status === "completed" ||
     statusData.status === "done"
   ) {
-    await c.env.STORAGE.put(r2Key, JSON.stringify(statusData), {
+    await c.env.STORAGE?.put(r2Key, JSON.stringify(statusData), {
       httpMetadata: { contentType: "application/json" },
       customMetadata: { completed_at: String(Date.now()) },
     });
@@ -129,7 +129,7 @@ app.delete("/:id", async (c) => {
   }
 
   const r2Key = `${R2_KEY_PREFIX}${jobId}`;
-  await c.env.STORAGE.delete(r2Key);
+  await c.env.STORAGE?.delete(r2Key);
   return c.body(null, 204);
 });
 

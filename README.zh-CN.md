@@ -22,7 +22,7 @@
 6. 选择你刚刚 Fork 的 `web-fetch` 仓库。
 7. 保持默认构建设置，点击 **Deploy**。
 
-第一次构建会自动创建项目需要的 KV、R2、Browser 和 Workers AI 绑定，不需要自己填写资源 ID。部署成功后，Cloudflare 会给你一个地址，例如：
+第一次构建会先创建可以直接运行的核心版本，包含 KV 和 Workers AI。R2 与 Browser 属于可选高级绑定：R2 必须先有真实的 bucket 名称，Browser Rendering 则需要账号的 Workers 套餐支持，因此初次部署不会强行声明它们。部署成功后，Cloudflare 会给你一个地址，例如：
 
 ```text
 https://web-fetch.你的子域.workers.dev
@@ -70,6 +70,11 @@ key-for-me,key-for-friend
 4. 创建后复制 token，粘贴到 `CF_API_TOKEN` 的 Secret 值里。
 
 普通网页读取不填这个也能用。注意：这里填的是 **Cloudflare token**，不是 OpenAI、Claude 或 Gemini 的 key。
+
+### 可选高级绑定
+
+- `STORAGE` 是可选的 R2 缓存，用于截图、PDF 和已完成的爬取结果。先创建 R2 bucket，再在 `r2_buckets` 中填写必需的 `bucket_name`。不配置时这些接口仍可工作，只是不缓存二进制结果。
+- `BROWSER` 用于 Puppeteer 交互工具和纸张规格 PDF。确认账号套餐已支持 Browser Rendering 后再加入 `browser` 绑定。上面的 `CF_API_TOKEN` 已可在不配置该绑定时开启 REST 渲染工具。
 
 ## AI 压缩配置（推荐使用 gpt-5.6-luna）
 

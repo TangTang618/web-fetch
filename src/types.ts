@@ -46,7 +46,8 @@ export type Env = {
   // --- Bindings ------------------------------------------------------------
   CACHE: KVNamespace;
   RATE_LIMIT: KVNamespace;
-  STORAGE: R2Bucket;
+  /** Optional R2 cache. Binary responses and crawl results work without caching when absent. */
+  STORAGE?: R2Bucket;
   /** Browser Rendering binding — needed for interaction + puppeteer PDF. */
   BROWSER?: Fetcher;
   /** Workers AI binding — compression fallback when no Gateway is configured. */

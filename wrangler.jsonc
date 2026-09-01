@@ -5,21 +5,16 @@
   "compatibility_date": "2026-08-01",
   "compatibility_flags": ["nodejs_compat"],
 
-  // Keep binding declarations in the config. Wrangler (>= 4.45) and the
-  // Cloudflare GitHub integration can provision KV/R2 resources automatically
-  // when resource IDs / bucket names are omitted.
+  // Cloudflare Workers Builds provisions these KV bindings for Git deployments.
   "kv_namespaces": [
     { "binding": "CACHE" },
     { "binding": "RATE_LIMIT" }
   ],
 
-  "r2_buckets": [
-    { "binding": "STORAGE" }
-  ],
-
-  // Headless Chrome. Needed for browser interaction and paper-size PDFs;
-  // this binding itself must remain declared in Wrangler.
-  "browser": { "binding": "BROWSER" },
+  // Optional advanced bindings are deliberately absent from the first deploy:
+  // - R2 requires a real bucket_name before it can be declared as STORAGE.
+  // - Browser Rendering requires an eligible paid Workers plan before BROWSER
+  //   can be enabled. CF_API_TOKEN still unlocks the REST rendering tools.
 
   // Workers AI — the compression fallback when no AI Gateway is configured.
   "ai": { "binding": "AI" },

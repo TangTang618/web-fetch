@@ -16,7 +16,7 @@ This path does **not** require Node.js, npm, or Wrangler on your computer.
 4. Click **Connect GitHub** if this is your first time, authorize Cloudflare, and select your fork.
 5. Keep the default build settings and click **Deploy**.
 
-The first build creates the KV, R2, Browser, and Workers AI bindings needed by the project. You do not need to enter resource IDs. Future pushes to your fork's `main` branch redeploy automatically.
+The first build creates a working core deployment with KV and Workers AI. R2 and the Browser binding are optional and are not declared on the first deploy, because R2 needs a real bucket name and Browser Rendering requires an eligible paid Workers plan. Future pushes to your fork's `main` branch redeploy automatically.
 
 Cloudflare will give you a URL like:
 
@@ -47,6 +47,11 @@ Click **Add**. Use **Secret** for credentials; do not store credentials as plain
 | `CF_API_TOKEN` | Secret | A Cloudflare API token | Enables screenshots, PDFs, crawls, AI extraction, and account-ID auto-detection |
 
 Create it at [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens): **Create Token → Edit Cloudflare Workers**. Plain web fetching still works without it. Do not paste an OpenAI, Anthropic, or Gemini key here.
+
+### Optional advanced bindings
+
+- `STORAGE` is an optional R2 cache for screenshots, PDFs, and completed crawl results. Create an R2 bucket first, then add an `r2_buckets` entry with its required `bucket_name`. The endpoints still work without this cache.
+- `BROWSER` enables Puppeteer interaction tools and paper-size PDF options. Add the `browser` binding only after Browser Rendering is available on the account's Workers plan. The `CF_API_TOKEN` route above already enables the REST rendering tools without this binding.
 
 ### AI Gateway compression
 

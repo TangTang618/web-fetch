@@ -246,6 +246,16 @@ describe("POST /screenshot", () => {
     const res = await postJson("/screenshot", {}, env);
     expect(res.status).toBe(400);
   });
+
+  it("returns the image when the optional R2 cache is absent", async () => {
+    const env = buildEnv();
+    delete env.STORAGE;
+    const pngData = new Uint8Array([137, 80, 78, 71]).buffer;
+    mockCfBinary(pngData, "image/png");
+    const res = await postJson("/screenshot", { url: "https://example.com" }, env);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Cache")).toBe("MISS");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -409,6 +419,25 @@ describe("GET /crawl/:id", () => {
     expect(res.headers.get("X-Cache")).toBe("HIT");
     // CF API called only once
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("polls successfully when the optional R2 cache is absent", async () => {
+    const env = buildEnv();
+    delete env.STORAGE;
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ status: "complete", pages: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+    const res = await app.fetch(
+      new Request("http://localhost/crawl/c3d4e5f6-a7b8-9012-cdef-123456789012", {
+        headers: { Authorization: "Bearer valid-key" },
+      }),
+      env
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Cache")).toBe("MISS");
   });
 });
 
